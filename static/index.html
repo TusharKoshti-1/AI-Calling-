@@ -1,0 +1,778 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>TVS iQube — AI Call Center</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=Bebas+Neue&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  :root {
+    --bg:       #0a0a0a;
+    --surface:  #111111;
+    --border:   #222222;
+    --accent:   #ff3d00;
+    --accent2:  #ff8c00;
+    --green:    #00e676;
+    --yellow:   #ffd600;
+    --muted:    #444444;
+    --text:     #e8e8e8;
+    --subtext:  #777777;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── SCANLINE OVERLAY ── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,.08) 2px, rgba(0,0,0,.08) 4px);
+    pointer-events: none;
+    z-index: 9999;
+  }
+
+  /* ── HEADER ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 22px;
+    letter-spacing: 3px;
+    color: var(--text);
+  }
+  .logo span { color: var(--accent); }
+  .status-pill {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 2px;
+    border: 1px solid var(--muted);
+    color: var(--subtext);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .status-pill.ok { border-color: var(--green); color: var(--green); }
+  .status-pill.ok::before {
+    content: '';
+    width: 6px; height: 6px;
+    background: var(--green);
+    border-radius: 50%;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%,100% { opacity:1; } 50% { opacity:.3; }
+  }
+
+  /* ── LAYOUT ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    height: calc(100vh - 56px);
+  }
+
+  /* ── LEFT PANEL ── */
+  .left-panel {
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--subtext);
+    text-transform: uppercase;
+  }
+
+  /* ── DIAL FORM ── */
+  .dial-form {
+    padding: 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .dial-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--subtext);
+    text-transform: uppercase;
+    margin-bottom: 8px;
+    display: block;
+  }
+  .dial-input-row {
+    display: flex;
+    gap: 8px;
+  }
+  .dial-input {
+    flex: 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 16px;
+    letter-spacing: 1px;
+    outline: none;
+    transition: border-color .2s;
+    border-radius: 2px;
+  }
+  .dial-input:focus { border-color: var(--accent); }
+  .dial-input::placeholder { color: var(--muted); font-size: 13px; }
+
+  .btn-call {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 0 20px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 16px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: background .15s, transform .1s;
+    white-space: nowrap;
+  }
+  .btn-call:hover { background: #e63600; }
+  .btn-call:active { transform: scale(.97); }
+  .btn-call:disabled { background: var(--muted); cursor: not-allowed; }
+
+  /* bulk */
+  .bulk-toggle {
+    margin-top: 12px;
+    font-size: 12px;
+    color: var(--subtext);
+    cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+    transition: color .2s;
+    user-select: none;
+  }
+  .bulk-toggle:hover { color: var(--accent); }
+  .bulk-area { display: none; margin-top: 10px; }
+  .bulk-area.open { display: block; }
+  .bulk-textarea {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 10px 14px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    resize: vertical;
+    min-height: 80px;
+    outline: none;
+    border-radius: 2px;
+  }
+  .bulk-textarea:focus { border-color: var(--accent); }
+  .btn-bulk {
+    margin-top: 8px;
+    width: 100%;
+    background: transparent;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 8px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 14px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    border-radius: 2px;
+    transition: background .15s;
+  }
+  .btn-bulk:hover { background: rgba(255,61,0,.1); }
+
+  /* ── STATS ── */
+  .stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .stat-box {
+    background: var(--surface);
+    padding: 16px 20px;
+  }
+  .stat-val {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 32px;
+    line-height: 1;
+    color: var(--text);
+  }
+  .stat-val.green { color: var(--green); }
+  .stat-val.yellow { color: var(--yellow); }
+  .stat-val.red { color: var(--accent); }
+  .stat-lbl {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    color: var(--subtext);
+    text-transform: uppercase;
+    margin-top: 2px;
+  }
+
+  /* ── CALL LIST ── */
+  .call-list {
+    flex: 1;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  .call-item {
+    padding: 14px 24px;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background .15s;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 6px;
+    align-items: center;
+  }
+  .call-item:hover { background: rgba(255,255,255,.03); }
+  .call-item.active { background: rgba(255,61,0,.06); border-left: 2px solid var(--accent); }
+  .call-phone {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .call-time {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--subtext);
+    margin-top: 2px;
+  }
+  .call-badge {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 2px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+  .badge-ringing  { background: rgba(255,214,0,.12); color: var(--yellow); border: 1px solid rgba(255,214,0,.3); }
+  .badge-answered { background: rgba(0,230,118,.12); color: var(--green);  border: 1px solid rgba(0,230,118,.3); }
+  .badge-completed{ background: rgba(255,255,255,.06); color: var(--subtext); border: 1px solid var(--border); }
+  .badge-no-answer{ background: rgba(255,61,0,.12); color: var(--accent); border: 1px solid rgba(255,61,0,.3); }
+  .badge-busy     { background: rgba(255,61,0,.12); color: var(--accent); border: 1px solid rgba(255,61,0,.3); }
+  .badge-failed   { background: rgba(255,61,0,.12); color: var(--accent); border: 1px solid rgba(255,61,0,.3); }
+
+  .empty-list {
+    padding: 48px 24px;
+    text-align: center;
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 2;
+  }
+
+  /* ── RIGHT PANEL ── */
+  .right-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .detail-header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .detail-phone {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 28px;
+    letter-spacing: 2px;
+  }
+  .detail-meta {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    color: var(--subtext);
+    margin-top: 2px;
+    display: flex; gap: 16px;
+  }
+  .detail-meta span { display: flex; align-items: center; gap: 4px; }
+
+  .detail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 32px;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  /* transcript */
+  .transcript-title {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    color: var(--subtext);
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  .transcript-empty {
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    padding: 24px 0;
+  }
+  .msg {
+    display: flex;
+    gap: 12px;
+    margin-bottom: 14px;
+    animation: fadeUp .25s ease;
+  }
+  @keyframes fadeUp {
+    from { opacity:0; transform: translateY(6px); }
+    to   { opacity:1; transform: translateY(0); }
+  }
+  .msg-avatar {
+    width: 28px; height: 28px;
+    border-radius: 2px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 12px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .msg-avatar.customer { background: rgba(255,255,255,.08); color: var(--text); }
+  .msg-avatar.ai       { background: rgba(255,61,0,.2);    color: var(--accent); }
+  .msg-content { flex: 1; }
+  .msg-name {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    color: var(--subtext);
+    margin-bottom: 4px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  .msg-text {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 10px 14px;
+    border-radius: 2px;
+    line-height: 1.6;
+    font-size: 13px;
+  }
+  .msg.ai .msg-text { border-color: rgba(255,61,0,.2); }
+
+  /* recording */
+  .recording-section {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+  }
+  .recording-link {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    color: var(--accent);
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border: 1px solid rgba(255,61,0,.3);
+    border-radius: 2px;
+    transition: background .15s;
+  }
+  .recording-link:hover { background: rgba(255,61,0,.1); }
+
+  /* empty detail */
+  .detail-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    color: var(--muted);
+  }
+  .detail-empty-icon {
+    font-size: 48px;
+    opacity: .3;
+  }
+  .detail-empty p {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+
+  /* toast */
+  #toast {
+    position: fixed;
+    bottom: 24px; right: 24px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 12px 20px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    border-radius: 2px;
+    transform: translateY(80px);
+    opacity: 0;
+    transition: all .3s ease;
+    z-index: 9998;
+    max-width: 320px;
+  }
+  #toast.show { transform: translateY(0); opacity: 1; }
+  #toast.success { border-color: var(--green); color: var(--green); }
+  #toast.error   { border-color: var(--accent); color: var(--accent); }
+
+  /* scrollbar */
+  ::-webkit-scrollbar { width: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">TVS iQube <span>AI</span> DIALER</div>
+  <div class="status-pill" id="statusPill">CHECKING...</div>
+</header>
+
+<div class="layout">
+
+  <!-- LEFT PANEL -->
+  <div class="left-panel">
+    <div class="panel-header">OUTBOUND CALLS</div>
+
+    <!-- DIAL FORM -->
+    <div class="dial-form">
+      <label class="dial-label">Phone Number</label>
+      <div class="dial-input-row">
+        <input id="phoneInput" class="dial-input" type="tel"
+               placeholder="+917984623076" autocomplete="off"/>
+        <button class="btn-call" id="callBtn" onclick="makeCall()">CALL</button>
+      </div>
+
+      <div class="bulk-toggle" onclick="toggleBulk()">
+        <span id="bulkArrow">▶</span> BULK DIAL (paste multiple numbers)
+      </div>
+      <div class="bulk-area" id="bulkArea">
+        <textarea class="bulk-textarea" id="bulkInput"
+                  placeholder="+917984623076&#10;+919876543210&#10;+918765432109"></textarea>
+        <button class="btn-bulk" onclick="bulkCall()">START BULK CALLING</button>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-val" id="statTotal">0</div>
+        <div class="stat-lbl">TOTAL CALLS</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-val green" id="statAnswered">0</div>
+        <div class="stat-lbl">ANSWERED</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-val yellow" id="statRinging">0</div>
+        <div class="stat-lbl">RINGING</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-val red" id="statFailed">0</div>
+        <div class="stat-lbl">NO ANSWER</div>
+      </div>
+    </div>
+
+    <!-- CALL LIST -->
+    <div class="call-list" id="callList">
+      <div class="empty-list" id="emptyList">
+        NO CALLS YET<br/>ENTER A NUMBER ABOVE TO BEGIN
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="right-panel" id="rightPanel">
+    <div class="detail-empty">
+      <div class="detail-empty-icon">📞</div>
+      <p>SELECT A CALL TO VIEW TRANSCRIPT</p>
+    </div>
+  </div>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+  let calls = [];
+  let selectedSid = null;
+  let pollInterval = null;
+  let bulkQueue = [];
+  let bulkRunning = false;
+
+  // ── Init ────────────────────────────────────────────────────────────────
+  async function init() {
+    await checkStatus();
+    await loadCalls();
+    pollInterval = setInterval(loadCalls, 3000);
+  }
+
+  async function checkStatus() {
+    try {
+      const r = await fetch('/api/status');
+      const d = await r.json();
+      const pill = document.getElementById('statusPill');
+      if (d.twilio_configured) {
+        pill.textContent = 'LIVE — ' + d.from_number;
+        pill.classList.add('ok');
+      } else {
+        pill.textContent = 'TWILIO_AUTH_TOKEN MISSING';
+      }
+    } catch(e) {
+      document.getElementById('statusPill').textContent = 'SERVER ERROR';
+    }
+  }
+
+  async function loadCalls() {
+    try {
+      const r = await fetch('/api/calls');
+      const d = await r.json();
+      calls = d.calls || [];
+      renderCallList();
+      updateStats();
+      if (selectedSid) renderDetail(selectedSid);
+    } catch(e) { /* silent */ }
+  }
+
+  // ── Make call ───────────────────────────────────────────────────────────
+  async function makeCall(phone) {
+    const input = document.getElementById('phoneInput');
+    const num = phone || input.value.trim();
+    if (!num) { toast('Enter a phone number', 'error'); return; }
+
+    const btn = document.getElementById('callBtn');
+    btn.disabled = true;
+    btn.textContent = '...';
+
+    try {
+      const r = await fetch('/api/call', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({phone: num})
+      });
+      const d = await r.json();
+      if (d.success) {
+        toast('✓ Call initiated → ' + num, 'success');
+        input.value = '';
+        await loadCalls();
+        if (d.sid) selectCall(d.sid);
+      } else {
+        toast('✗ ' + (d.error || 'Call failed'), 'error');
+      }
+    } catch(e) {
+      toast('✗ Network error', 'error');
+    }
+
+    btn.disabled = false;
+    btn.textContent = 'CALL';
+  }
+
+  // ── Bulk calling ────────────────────────────────────────────────────────
+  function toggleBulk() {
+    const area = document.getElementById('bulkArea');
+    const arrow = document.getElementById('bulkArrow');
+    area.classList.toggle('open');
+    arrow.textContent = area.classList.contains('open') ? '▼' : '▶';
+  }
+
+  async function bulkCall() {
+    const raw = document.getElementById('bulkInput').value;
+    const numbers = raw.split('\n').map(n => n.trim()).filter(n => n.length > 5);
+    if (!numbers.length) { toast('No valid numbers found', 'error'); return; }
+
+    for (const num of numbers) {
+      await makeCall(num);
+      await sleep(2000); // 2s gap between calls
+    }
+    toast(`✓ Queued ${numbers.length} calls`, 'success');
+  }
+
+  // ── Render list ─────────────────────────────────────────────────────────
+  function renderCallList() {
+    const list = document.getElementById('callList');
+    const empty = document.getElementById('emptyList');
+
+    if (!calls.length) {
+      empty.style.display = 'block';
+      // remove existing items
+      list.querySelectorAll('.call-item').forEach(el => el.remove());
+      return;
+    }
+    empty.style.display = 'none';
+
+    // Rebuild list
+    const existing = {};
+    list.querySelectorAll('.call-item').forEach(el => {
+      existing[el.dataset.sid] = el;
+    });
+
+    calls.forEach((c, i) => {
+      let el = existing[c.sid];
+      if (!el) {
+        el = document.createElement('div');
+        el.className = 'call-item';
+        el.dataset.sid = c.sid;
+        el.onclick = () => selectCall(c.sid);
+        list.appendChild(el);
+      }
+      if (selectedSid === c.sid) el.classList.add('active');
+      else el.classList.remove('active');
+
+      const badgeClass = {
+        ringing: 'badge-ringing', answered: 'badge-answered',
+        completed: 'badge-completed', 'no-answer': 'badge-no-answer',
+        busy: 'badge-busy', failed: 'badge-failed'
+      }[c.status] || 'badge-completed';
+
+      el.innerHTML = `
+        <div>
+          <div class="call-phone">${c.phone || c.sid}</div>
+          <div class="call-time">${c.started_at || ''} · ${c.duration || '—'}</div>
+        </div>
+        <span class="call-badge ${badgeClass}">${c.status}</span>
+      `;
+    });
+
+    // Remove stale items
+    Object.keys(existing).forEach(sid => {
+      if (!calls.find(c => c.sid === sid)) existing[sid].remove();
+    });
+  }
+
+  // ── Stats ────────────────────────────────────────────────────────────────
+  function updateStats() {
+    document.getElementById('statTotal').textContent = calls.length;
+    document.getElementById('statAnswered').textContent =
+      calls.filter(c => ['answered','completed'].includes(c.status)).length;
+    document.getElementById('statRinging').textContent =
+      calls.filter(c => c.status === 'ringing').length;
+    document.getElementById('statFailed').textContent =
+      calls.filter(c => ['no-answer','busy','failed'].includes(c.status)).length;
+  }
+
+  // ── Detail view ──────────────────────────────────────────────────────────
+  function selectCall(sid) {
+    selectedSid = sid;
+    document.querySelectorAll('.call-item').forEach(el => {
+      el.classList.toggle('active', el.dataset.sid === sid);
+    });
+    renderDetail(sid);
+  }
+
+  function renderDetail(sid) {
+    const call = calls.find(c => c.sid === sid);
+    if (!call) return;
+
+    const panel = document.getElementById('rightPanel');
+    const transcript = call.transcript || [];
+    const badgeClass = {
+      ringing: 'badge-ringing', answered: 'badge-answered',
+      completed: 'badge-completed', 'no-answer': 'badge-no-answer',
+      busy: 'badge-busy', failed: 'badge-failed'
+    }[call.status] || 'badge-completed';
+
+    let transcriptHTML = '';
+    if (transcript.length === 0) {
+      transcriptHTML = '<div class="transcript-empty">Waiting for conversation...</div>';
+    } else {
+      transcript.forEach(line => {
+        const isAI = line.startsWith('Priya (AI):');
+        const isCustomer = line.startsWith('Customer:');
+        if (isAI) {
+          const text = line.replace('Priya (AI):', '').trim();
+          transcriptHTML += `
+            <div class="msg ai">
+              <div class="msg-avatar ai">AI</div>
+              <div class="msg-content">
+                <div class="msg-name">Priya — AI</div>
+                <div class="msg-text">${escHtml(text)}</div>
+              </div>
+            </div>`;
+        } else if (isCustomer) {
+          const text = line.replace('Customer:', '').trim();
+          transcriptHTML += `
+            <div class="msg">
+              <div class="msg-avatar customer">C</div>
+              <div class="msg-content">
+                <div class="msg-name">Customer</div>
+                <div class="msg-text">${escHtml(text)}</div>
+              </div>
+            </div>`;
+        }
+      });
+    }
+
+    let recordingHTML = '';
+    if (call.recording) {
+      recordingHTML = `
+        <div class="recording-section">
+          <div class="transcript-title">RECORDING</div>
+          <a class="recording-link" href="${call.recording}" target="_blank">
+            ▶ PLAY RECORDING
+          </a>
+        </div>`;
+    }
+
+    panel.innerHTML = `
+      <div class="detail-header">
+        <div>
+          <div class="detail-phone">${call.phone || call.sid}</div>
+          <div class="detail-meta">
+            <span>📅 ${call.started_at || '—'}</span>
+            <span>⏱ ${call.duration || '—'}</span>
+            <span><span class="call-badge ${badgeClass}">${call.status}</span></span>
+          </div>
+        </div>
+      </div>
+      <div class="detail-body">
+        <div class="transcript-title">CONVERSATION TRANSCRIPT</div>
+        ${transcriptHTML}
+        ${recordingHTML}
+      </div>
+    `;
+  }
+
+  // ── Enter key on input ────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('phoneInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') makeCall();
+    });
+    init();
+  });
+
+  // ── Toast ────────────────────────────────────────────────────────────────
+  let toastTimeout;
+  function toast(msg, type='success') {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'show ' + type;
+    clearTimeout(toastTimeout);
+    toastTimeout = setTimeout(() => el.className = '', 3500);
+  }
+
+  function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>
