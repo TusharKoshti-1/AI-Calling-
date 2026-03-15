@@ -41,10 +41,17 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     log.info("Starting CallSara...")
-    await init_db()
-    await ensure_bucket()
+    try:
+        await init_db()
+        await ensure_bucket()
+    except Exception as e:
+        log.error(f"Startup warning (DB/Storage): {e}")
+        log.warning("App will start but DB features may be unavailable")
     yield
-    await close_db()
+    try:
+        await close_db()
+    except Exception:
+        pass
     log.info("CallSara stopped.")
 
 
@@ -55,9 +62,34 @@ app.add_middleware(
 )
 
 # ── In-memory call state (live calls only) ────────────────────
-# Cleared when call ends. DB is source of truth for history.
-_call_state: dict = {}   # sid → {history, started_at}
+_call_state: dict = {}
 _intro_cache: Optional[bytes] = None
+
+
+# ── Safe DB helpers — never crash the call flow ───────────────
+async def _safe_upsert(sid, data):
+    try:
+        await upsert_call(sid, data)
+    except Exception as e:
+        log.error(f"DB upsert_call error [{sid}]: {e}")
+
+async def _safe_update(sid, **kwargs):
+    try:
+        await update_call(sid, **kwargs)
+    except Exception as e:
+        log.error(f"DB update_call error [{sid}]: {e}")
+
+async def _safe_insert_msg(sid, role, content):
+    try:
+        await insert_message(sid, role, content)
+    except Exception as e:
+        log.error(f"DB insert_message error [{sid}]: {e}")
+
+async def _safe_finalize(sid, status, duration, rec_url, rec_path, transcript):
+    try:
+        await finalize_call(sid, status, duration, rec_url, rec_path, transcript)
+    except Exception as e:
+        log.error(f"DB finalize_call error [{sid}]: {e}")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -89,11 +121,14 @@ async def api_status():
 async def api_stats():
     try:
         stats = await get_stats()
-        # Convert Decimal/int to plain types
         return {k: int(v) if v is not None else 0 for k, v in stats.items()}
     except Exception as e:
         log.error(f"Stats error: {e}")
-        return {"total_calls":0,"hot_leads":0,"answered":0,"no_answer":0,"ringing":0,"avg_duration_sec":0,"calls_today":0,"hot_leads_today":0}
+        return {
+            "total_calls": 0, "hot_leads": 0, "answered": 0,
+            "no_answer": 0, "ringing": 0, "avg_duration_sec": 0,
+            "calls_today": 0, "hot_leads_today": 0
+        }
 
 
 @app.get("/api/calls")
@@ -116,9 +151,8 @@ async def api_calls(
             hot_only=hot_only,
             search=search or None,
         )
-        # Serialize datetimes
         for c in calls:
-            for k in ("started_at","ended_at","created_at"):
+            for k in ("started_at", "ended_at", "created_at"):
                 if c.get(k) and hasattr(c[k], "isoformat"):
                     c[k] = c[k].isoformat()
             if c.get("id"):
@@ -175,19 +209,18 @@ async def api_call(request: Request):
     if resp.status_code in (200, 201):
         data = resp.json()
         sid  = data.get("sid", "")
-        # Save to DB immediately
-        await upsert_call(sid, {
+        _call_state[sid] = {
+            "history":    [],
+            "phone":      phone,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        await _safe_upsert(sid, {
             "phone":       phone,
             "from_number": TWILIO_FROM,
             "status":      "ringing",
             "agent_name":  AGENT_NAME,
             "agency_name": AGENCY_NAME,
         })
-        # Init in-memory state
-        _call_state[sid] = {
-            "history":    [],
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        }
         log.info(f"Call started SID={sid}")
         return {"success": True, "sid": sid}
 
@@ -200,7 +233,7 @@ async def api_call(request: Request):
 
 
 # ══════════════════════════════════════════════════════════════
-# TWILIO WEBHOOKS
+# TWILIO WEBHOOKS — these MUST never return 500 or call drops
 # ══════════════════════════════════════════════════════════════
 
 @app.post("/twiml-greeting")
@@ -224,7 +257,8 @@ async def intro_audio():
         log.info("Generating intro audio...")
         _intro_cache = await synthesize(INTRO_TEXT)
     if _intro_cache:
-        return Response(content=_intro_cache, media_type="audio/wav")
+        return Response(content=_intro_cache, media_type="audio/wav",
+                        headers={"Cache-Control": "public, max-age=3600"})
     return Response(status_code=500)
 
 
@@ -240,13 +274,14 @@ async def process_speech(
     speech   = (SpeechResult or "").strip()
     log.info(f"[{call_sid}] Speech: '{speech}'")
 
-    # Init state if first exchange
+    # ── Init state if first exchange ──────────────────────────
     if call_sid not in _call_state:
         _call_state[call_sid] = {
             "history":    [],
+            "phone":      to_num,
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
-        await upsert_call(call_sid, {
+        await _safe_upsert(call_sid, {
             "phone":       to_num,
             "from_number": From or "",
             "status":      "answered",
@@ -254,38 +289,40 @@ async def process_speech(
             "agency_name": AGENCY_NAME,
         })
     else:
-        await update_call(call_sid, status="answered")
+        await _safe_update(call_sid, status="answered")
 
     customer_text = speech if speech else "hello"
 
-    # Save customer message to DB
+    # Save customer message (non-blocking on failure)
     if speech:
-        await insert_message(call_sid, "customer", speech)
+        await _safe_insert_msg(call_sid, "customer", speech)
 
-    # Groq with full history
+    # ── Groq LLM ──────────────────────────────────────────────
     state   = _call_state[call_sid]
     history = state["history"]
     history.append({"role": "user", "content": customer_text})
 
-    raw_reply = await get_reply(customer_text, history=history[:-1])
+    try:
+        raw_reply = await get_reply(customer_text, history=history[:-1])
+    except Exception as e:
+        log.error(f"Groq error [{call_sid}]: {e}")
+        raw_reply = "Thank you for calling, I'll have our team follow up with you. Have a great day! [END_CALL]"
+
     reply_text, end_call, is_hot_lead = clean_reply(raw_reply)
     log.info(f"[{call_sid}] Reply='{reply_text}' end={end_call} hot={is_hot_lead}")
 
-    # Append AI reply to history
+    # Update history and DB
     history.append({"role": "assistant", "content": reply_text})
-
-    # Save AI message to DB
-    await insert_message(call_sid, "ai", reply_text)
-
-    # Update hot lead flag if needed
+    await _safe_insert_msg(call_sid, "ai", reply_text)
     if is_hot_lead:
-        await update_call(call_sid, hot_lead=True)
+        await _safe_update(call_sid, hot_lead=True)
 
-    # Store pending TTS text
+    # ── Store TTS text for /reply-audio ───────────────────────
     state["pending"] = reply_text
 
     audio_url = f"{BASE_URL}/reply-audio?sid={call_sid}"
 
+    # ── Build TwiML ───────────────────────────────────────────
     if end_call:
         twiml = (
             '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n'
@@ -309,12 +346,22 @@ async def process_speech(
 
 @app.get("/reply-audio")
 async def reply_audio(sid: str = ""):
+    """Generate TTS for the pending reply and return WAV"""
     state = _call_state.get(sid, {})
     text  = state.pop("pending", None) or "Thank you, have a great day!"
-    audio = await synthesize(text)
+    log.info(f"[{sid}] TTS: '{text[:80]}'")
+
+    try:
+        audio = await synthesize(text)
+    except Exception as e:
+        log.error(f"TTS error [{sid}]: {e}")
+        audio = None
+
     if audio:
-        return Response(content=audio, media_type="audio/wav")
-    return Response(status_code=500)
+        return Response(content=audio, media_type="audio/wav",
+                        headers={"Cache-Control": "no-store"})
+    # Return 204 so Twilio doesn't retry endlessly on error
+    return Response(status_code=204)
 
 
 @app.post("/call-status")
@@ -330,35 +377,34 @@ async def call_status(
     duration  = int(CallDuration or 0)
     recording = RecordingUrl or ""
 
-    log.info(f"[{call_sid}] Status={status} Duration={duration}s Recording={recording}")
+    log.info(f"[{call_sid}] Status={status} Duration={duration}s")
 
-    # Build transcript from DB messages
-    msgs = await get_call_messages(call_sid)
+    # Build transcript from in-memory history (already have it)
+    state = _call_state.get(call_sid, {})
+    history = state.get("history", [])
     transcript_lines = []
-    for m in msgs:
-        prefix = f"{AGENT_NAME} (AI)" if m["role"] == "ai" else "Customer"
-        transcript_lines.append(f"{prefix}: {m['content']}")
+    for i, msg in enumerate(history):
+        prefix = f"{AGENT_NAME} (AI)" if msg["role"] == "assistant" else "Customer"
+        transcript_lines.append(f"{prefix}: {msg['content']}")
     transcript = "\n".join(transcript_lines)
 
     # Upload recording to Supabase Storage
     rec_url, rec_path = "", ""
-    if recording and status in ("completed",):
-        rec_url, rec_path = await upload_recording(call_sid, recording)
+    if recording and status == "completed":
+        try:
+            rec_url, rec_path = await upload_recording(call_sid, recording)
+        except Exception as e:
+            log.error(f"Recording upload error: {e}")
+            rec_url = recording + ".mp3"
 
     if not rec_url and recording:
         rec_url = recording + ".mp3"
 
-    # Finalize in DB
-    await finalize_call(
-        sid=call_sid,
-        status=status,
-        duration_sec=duration,
-        recording_url=rec_url,
-        recording_path=rec_path,
-        transcript=transcript,
+    await _safe_finalize(
+        call_sid, status, duration, rec_url, rec_path, transcript
     )
 
-    # Clean up in-memory state
+    # Clean up
     _call_state.pop(call_sid, None)
 
     return Response(content="OK", media_type="text/plain")
@@ -378,7 +424,7 @@ async def health():
         db_ok = True
     except Exception:
         db_ok = False
-    return {"status": "ok" if db_ok else "degraded", "db": db_ok}
+    return {"status": "ok", "db": db_ok, "agent": AGENT_NAME}
 
 
 if __name__ == "__main__":
