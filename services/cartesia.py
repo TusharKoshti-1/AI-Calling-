@@ -24,9 +24,8 @@ async def synthesize(text: str) -> Optional[bytes]:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post("https://api.cartesia.ai/tts/bytes", headers=_HEADERS, json=payload)
             if resp.status_code == 200:
-                log.info(f"Cartesia TTS: {len(resp.content)} bytes")
                 return resp.content
-            log.error(f"Cartesia {resp.status_code}: {resp.text}")
+            log.error(f"Cartesia {resp.status_code}: {resp.text[:200]}")
     except Exception as e:
         log.error(f"Cartesia error: {e}")
     return None
