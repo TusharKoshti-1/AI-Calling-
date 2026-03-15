@@ -26,11 +26,11 @@ CARTESIA_VERSION  = "2024-06-10"
 # ── SUPABASE ──────────────────────────────────────────────────
 SUPABASE_URL      = os.getenv("SUPABASE_URL",      "https://zwiiinbjdnjgmclfknrq.supabase.co")
 SUPABASE_KEY      = os.getenv("SUPABASE_KEY",      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3aWlpbmJqZG5qZ21jbGZrbnJxIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MzU1OTA3NCwiZXhwIjoyMDg5MTM1MDc0fQ.HKYljZFeXUieNDhv2qCQ1_rvlZuXUgERx6TLlPDiUyo")
-SUPABASE_DB_HOST  = os.getenv("SUPABASE_DB_HOST",  "db.zwiiinbjdnjgmclfknrq.supabase.co")
-SUPABASE_DB_PORT  = int(os.getenv("SUPABASE_DB_PORT", "5432"))
+SUPABASE_DB_HOST  = os.getenv("SUPABASE_DB_HOST",  "aws-0-ap-south-1.pooler.supabase.com")
+SUPABASE_DB_PORT  = int(os.getenv("SUPABASE_DB_PORT", "6543"))
 SUPABASE_DB_NAME  = os.getenv("SUPABASE_DB_NAME",  "postgres")
-SUPABASE_DB_USER  = os.getenv("SUPABASE_DB_USER",  "postgres")
-SUPABASE_DB_PASS  = os.getenv("SUPABASE_DB_PASS",  "")   # Your DB password
+SUPABASE_DB_USER  = os.getenv("SUPABASE_DB_USER",  "postgres.zwiiinbjdnjgmclfknrq")
+SUPABASE_DB_PASS  = os.getenv("SUPABASE_DB_PASS",  "9824243834Papa.")   # Your DB password
 SUPABASE_BUCKET   = os.getenv("SUPABASE_BUCKET",   "recordings")
 
 # ── AGENT ─────────────────────────────────────────────────────
