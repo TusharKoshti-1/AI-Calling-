@@ -55,7 +55,8 @@ INSERT INTO settings (key, value) VALUES
     ('agent_name',   'Sara'),
     ('agency_name',  'Prestige Properties Dubai'),
     ('intro_text',   'Hello, this is Sara calling from Prestige Properties Dubai. You recently inquired about one of our properties — I just wanted to follow up quickly. Do you have two minutes?'),
-    ('system_prompt', 'default')
+    ('system_prompt', 'default'),
+    ('voice_id',      '95d51f79-c397-46f9-b49a-23763d3eaa2d')
 ON CONFLICT (key) DO NOTHING;
 
 -- ── AUTO-UPDATE updated_at ────────────────────────────────────

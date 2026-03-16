@@ -37,12 +37,19 @@ log = logging.getLogger(__name__)
 
 
 # ── Runtime settings cache (updated from DB on startup + via API) ─────────────
+from services.cartesia import DEFAULT_VOICE_ID
+
 _settings: dict = {
     "agent_name":    AGENT_NAME,
     "agency_name":   AGENCY_NAME,
     "intro_text":    "",
     "system_prompt": "default",
+    "voice_id":      DEFAULT_VOICE_ID,
 }
+
+def _get_voice_id() -> str:
+    v = _settings.get("voice_id","").strip()
+    return v if v else DEFAULT_VOICE_ID
 
 def _get_intro() -> str:
     t = _settings.get("intro_text","").strip()
@@ -244,7 +251,7 @@ async def api_get_settings():
 @app.post("/api/settings")
 async def api_save_settings(request: Request):
     body = await request.json()
-    allowed = {"agent_name","agency_name","intro_text","system_prompt"}
+    allowed = {"agent_name","agency_name","intro_text","system_prompt","voice_id"}
     saved = {}
     for key, val in body.items():
         if key in allowed and isinstance(val, str):
@@ -281,7 +288,7 @@ async def intro_audio():
     if not _intro_cache:
         text = _get_intro()
         log.info(f"Generating intro: {text[:80]}")
-        _intro_cache = await synthesize(text)
+        _intro_cache = await synthesize(text, voice_id=_get_voice_id())
     if _intro_cache:
         return Response(content=_intro_cache, media_type="audio/wav",
                         headers={"Cache-Control":"public, max-age=3600"})
@@ -362,7 +369,7 @@ async def reply_audio(sid: str = ""):
     text  = state.pop("pending", None) or "Thank you, have a great day!"
     log.info(f"[{sid}] TTS: '{text[:80]}'")
     try:
-        audio = await synthesize(text)
+        audio = await synthesize(text, voice_id=_get_voice_id())
     except Exception as e:
         log.error(f"TTS error [{sid}]: {e}")
         audio = None
@@ -436,6 +443,32 @@ async def call_status(
         await _db(update_call, call_sid, status="answered")
 
     return Response(content="OK", media_type="text/plain")
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VOICE PREVIEW API
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.post("/api/voice/preview")
+async def voice_preview(request: Request):
+    """Generate a short audio preview for a voice ID — returns MP3 for browser playback"""
+    body    = await request.json()
+    vid     = (body.get("voice_id") or "").strip()
+    text    = (body.get("text") or "").strip()
+    if not vid:
+        return JSONResponse({"error": "voice_id required"}, status_code=400)
+    if not text:
+        text = "Hello, this is Sara calling from Prestige Properties Dubai. You recently inquired about one of our properties."
+
+    try:
+        audio = await synthesize(text, voice_id=vid, encoding="mp3")
+        if audio:
+            return Response(content=audio, media_type="audio/mpeg",
+                           headers={"Cache-Control": "no-store"})
+        return JSONResponse({"error": "TTS generation failed"}, status_code=500)
+    except Exception as e:
+        log.error(f"Voice preview error: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/health")

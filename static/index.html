@@ -349,6 +349,41 @@ body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-s
 #toast.ok{border-color:rgba(45,212,160,.4);color:var(--green)}
 #toast.err{border-color:rgba(240,96,96,.4);color:var(--red)}
 #toast.info{border-color:rgba(201,168,76,.4);color:var(--gold)}
+
+/* ─── VOICE PAGE ──────────────────────────────────────────── */
+.vg-label{font-size:10px;letter-spacing:2px;color:var(--t3);text-transform:uppercase;font-family:'DM Mono',monospace;margin-bottom:10px;padding:0 2px}
+.voice-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.vc{background:var(--s);border:1px solid var(--b);border-radius:var(--r2);overflow:hidden;transition:border-color .2s}
+.vc:hover{border-color:var(--b3)}
+.vc.vc-active{border-color:var(--gold);background:linear-gradient(135deg,var(--s),rgba(201,168,76,.04))}
+.vc-head{padding:15px 18px 10px;display:flex;align-items:center;justify-content:space-between}
+.vc-info{display:flex;align-items:center;gap:12px}
+.vc-av{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0}
+.av-in{background:linear-gradient(135deg,#ff9933,#138808)}
+.av-ar{background:linear-gradient(135deg,#006c35,#ce1126)}
+.vc-name{font-size:15px;font-weight:600;color:var(--t)}
+.vc-lang{font-size:11px;color:var(--t3);margin-top:2px;font-family:'DM Mono',monospace}
+.vc-note{padding:0 18px 11px;font-size:12px;color:var(--t3)}
+.wf{height:34px;padding:0 18px 10px;display:flex;align-items:center;gap:2px}
+.wb{flex:1;background:var(--b2);border-radius:2px;transition:height .08s;min-height:3px;max-height:26px}
+.wb.wa{background:var(--blue)}
+.vc-foot{padding:11px 18px;display:flex;gap:8px;align-items:center;border-top:1px solid var(--b)}
+.prev-btn{
+  display:flex;align-items:center;gap:6px;padding:7px 14px;
+  border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;
+  border:1px solid var(--b2);background:transparent;color:var(--t2);transition:all .15s;
+}
+.prev-btn:hover{border-color:var(--blue);color:var(--blue);background:var(--blue2)}
+.prev-btn.pb-load{color:var(--amber);border-color:var(--amber)}
+.prev-btn.pb-play{color:var(--green);border-color:var(--green);background:var(--green2)}
+.use-btn{
+  margin-left:auto;display:flex;align-items:center;gap:5px;padding:7px 14px;
+  border-radius:var(--r);font-size:12px;font-weight:600;cursor:pointer;
+  border:1px solid rgba(201,168,76,.35);background:transparent;color:var(--gold);transition:all .15s;
+}
+.use-btn:hover{background:var(--gold3)}
+.use-btn.ub-active{background:var(--gold);color:#0b0e14;border-color:var(--gold)}
+
 </style>
 </head>
 <body>
@@ -381,6 +416,10 @@ body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-s
     <div class="nav-item" data-page="settings" onclick="goPage('settings',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
       Settings
+    </div>
+    <div class="nav-item" data-page="voice" onclick="goPage('voice',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      AI Voice
     </div>
   </div>
   <div class="sidebar-foot">
@@ -661,6 +700,41 @@ body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-s
       </div>
     </div>
 
+
+    <!-- ══ AI VOICE ══════════════════════════════════════════════ -->
+    <div class="page" id="p-voice">
+      <div class="page-body">
+        <div style="max-width:920px">
+
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-hd">
+              <div class="card-title">🎙️ Active Voice</div>
+              <span id="active-voice-name" style="font-size:12px;color:var(--gold);font-family:'DM Mono',monospace;background:var(--gold3);padding:3px 12px;border-radius:20px">Loading...</span>
+            </div>
+            <div style="padding:12px 18px;font-size:12px;color:var(--t3)">
+              The active voice is used on all outbound calls. Click <strong style="color:var(--t2)">Use This Voice</strong> on any card to switch instantly.
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-hd"><div class="card-title">💬 Preview Text</div></div>
+            <div style="padding:14px 18px">
+              <label class="fl">Text to speak in preview</label>
+              <input class="ph-input" id="preview-text" style="width:100%"
+                value="Hello, this is Sara calling from Prestige Properties Dubai. You recently inquired about one of our properties. Do you have two minutes?"/>
+            </div>
+          </div>
+
+          <div class="vg-label">🇮🇳 Indian Accent</div>
+          <div id="indian-voices" class="voice-grid"></div>
+
+          <div class="vg-label" style="margin-top:22px">🇦🇪 Arabic Accent</div>
+          <div id="arabic-voices" class="voice-grid"></div>
+
+        </div>
+      </div>
+    </div>
+
   </div><!-- /pages -->
 </div><!-- /main -->
 
@@ -765,7 +839,7 @@ async function loadStats() {
 // ══════════════════════════════════════════════════════════════
 // PAGES
 // ══════════════════════════════════════════════════════════════
-const pageTitles = {dashboard:'Dashboard',calls:'All Calls',hot:'Hot Leads',dialer:'New Call',settings:'Settings'};
+const pageTitles = {dashboard:'Dashboard',calls:'All Calls',hot:'Hot Leads',dialer:'New Call',settings:'Settings',voice:'AI Voice'};
 
 function goPage(name, el) {
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -777,6 +851,7 @@ function goPage(name, el) {
   if(name==='calls')    loadTableData('cl');
   if(name==='hot')      loadHotPage();
   if(name==='settings') loadSettings();
+  if(name==='voice')    loadVoicePage();
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1157,6 +1232,152 @@ function toast(msg,type='info') {
 }
 
 init();
+
+// ══════════════════════════════════════════════════════════════
+// VOICE PAGE
+// ══════════════════════════════════════════════════════════════
+const VOICES = {
+  indian: [
+    {id:"95d51f79-c397-46f9-b49a-23763d3eaa2d",name:"Priya",lang:"Hindi / Hinglish · Female",avCls:"av-in",note:"Warm, natural Indian accent. Best for Hinglish calls to India."}
+  ],
+  arabic: [
+    {id:"002622d8-19d0-4567-a16a-f99c7397c062",name:"Huda",  lang:"Gulf Arabic · Female",avCls:"av-ar",note:"Warm professional Gulf Arabic, great for female persona."},
+    {id:"fc923f89-1de5-4ddf-b93c-6da2ba63428a",name:"Nour",  lang:"Gulf Arabic · Female",avCls:"av-ar",note:"Soft and friendly, clear Gulf dialect."},
+    {id:"f1cdfb4a-bf7d-4e83-916e-8f0802278315",name:"Walid", lang:"Gulf Arabic · Male",  avCls:"av-ar",note:"Confident and authoritative, Gulf accent."},
+    {id:"664aec8a-64a4-4437-8a0b-a61aa4f51fe6",name:"Hassan",lang:"Gulf Arabic · Male",  avCls:"av-ar",note:"Deep, reassuring Gulf Arabic voice."},
+    {id:"b0aa4612-81d2-4df3-9730-3fc064754b1f",name:"Khalid",lang:"Gulf Arabic · Male",  avCls:"av-ar",note:"Clear and professional Gulf tone."}
+  ]
+};
+
+let activeVoiceId="";
+let curAudio=null, curBtnId=null;
+let wfTimers={};
+const allVoices=()=>[...VOICES.indian,...VOICES.arabic];
+
+async function loadVoicePage(){
+  try{
+    const s=await api("/api/settings");
+    activeVoiceId=s.voice_id||"95d51f79-c397-46f9-b49a-23763d3eaa2d";
+  }catch(e){}
+  renderVoiceGrid("indian-voices",VOICES.indian);
+  renderVoiceGrid("arabic-voices",VOICES.arabic);
+  updateActiveLabel();
+}
+
+function renderVoiceGrid(containerId,voices){
+  document.getElementById(containerId).innerHTML=voices.map(v=>vcHtml(v)).join("");
+}
+
+function vcHtml(v){
+  const flag=v.avCls==="av-in"?"🇮🇳":"🇦🇪";
+  const sid=v.id.replace(/-/g,"").slice(0,8);
+  const isActive=v.id===activeVoiceId;
+  const pbId="pb-"+sid;
+  const vj=JSON.stringify(v).replace(/"/g,"&quot;");
+  return `<div class="vc ${isActive?"vc-active":""}" id="vc-${sid}">
+    <div class="vc-head">
+      <div class="vc-info">
+        <div class="vc-av ${v.avCls}">${flag}</div>
+        <div>
+          <div class="vc-name">${esc(v.name)} ${isActive?'<span style="font-size:9px;color:var(--gold);background:var(--gold3);padding:1px 7px;border-radius:20px;vertical-align:middle;letter-spacing:1px">ACTIVE</span>':""}</div>
+          <div class="vc-lang">${esc(v.lang)}</div>
+        </div>
+      </div>
+    </div>
+    <div class="vc-note">${esc(v.note)}</div>
+    <div class="wf" id="wf-${sid}">${Array(18).fill(0).map((_,i)=>`<div class="wb" id="wb-${sid}-${i}" style="height:${3+Math.random()*8}px"></div>`).join("")}</div>
+    <div class="vc-foot">
+      <button class="prev-btn" id="${pbId}" onclick="previewVoice(${vj},'${pbId}')">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Preview
+      </button>
+      <button class="use-btn ${isActive?"ub-active":""}" id="ub-${sid}" onclick="setActiveVoice(${vj})">
+        ${isActive?"✓ Active":"Use This Voice"}
+      </button>
+    </div>
+  </div>`;
+}
+
+async function previewVoice(voice,btnId){
+  if(curAudio){curAudio.pause();curAudio=null;}
+  if(curBtnId&&curBtnId!==btnId){resetPBtn(curBtnId);}
+  if(curBtnId===btnId){
+    const sid=voice.id.replace(/-/g,"").slice(0,8);
+    stopWf(sid); curBtnId=null; return;
+  }
+  const btn=document.getElementById(btnId);
+  if(!btn)return;
+  btn.className="prev-btn pb-load";
+  btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Loading...';
+  curBtnId=btnId;
+  const text=document.getElementById("preview-text")?.value?.trim()||"Hello, this is Sara from Prestige Properties Dubai.";
+  const sid=voice.id.replace(/-/g,"").slice(0,8);
+  try{
+    const resp=await fetch("/api/voice/preview",{
+      method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({voice_id:voice.id,text})
+    });
+    if(!resp.ok)throw new Error("HTTP "+resp.status);
+    const blob=await resp.blob();
+    const url=URL.createObjectURL(blob);
+    const audio=new Audio(url);
+    curAudio=audio;
+    btn.className="prev-btn pb-play";
+    btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg> Playing';
+    startWf(sid);
+    audio.onended=()=>{resetPBtn(btnId);stopWf(sid);curAudio=null;curBtnId=null;URL.revokeObjectURL(url);};
+    audio.onerror=()=>{resetPBtn(btnId);stopWf(sid);curAudio=null;curBtnId=null;};
+    audio.play();
+  }catch(err){
+    console.error(err);resetPBtn(btnId);stopWf(sid);curAudio=null;curBtnId=null;
+    toast("Preview failed: "+err.message,"err");
+  }
+}
+
+function resetPBtn(id){
+  const b=document.getElementById(id);
+  if(!b)return;
+  b.className="prev-btn";
+  b.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg> Preview';
+}
+
+function startWf(sid){
+  stopWf(sid);
+  wfTimers[sid]=setInterval(()=>{
+    for(let i=0;i<18;i++){
+      const b=document.getElementById(`wb-${sid}-${i}`);
+      if(b){b.className="wb wa";b.style.height=(4+Math.random()*20)+"px";}
+    }
+  },100);
+}
+function stopWf(sid){
+  if(wfTimers[sid]){clearInterval(wfTimers[sid]);delete wfTimers[sid];}
+  for(let i=0;i<18;i++){
+    const b=document.getElementById(`wb-${sid}-${i}`);
+    if(b){b.className="wb";b.style.height=(3+Math.random()*7)+"px";}
+  }
+}
+
+async function setActiveVoice(voice){
+  if(curAudio){curAudio.pause();curAudio=null;}
+  if(curBtnId){resetPBtn(curBtnId);curBtnId=null;}
+  Object.keys(wfTimers).forEach(sid=>{stopWf(sid);});
+  try{
+    const d=await api("/api/settings","POST",{voice_id:voice.id});
+    if(d.success){
+      activeVoiceId=voice.id;
+      renderVoiceGrid("indian-voices",VOICES.indian);
+      renderVoiceGrid("arabic-voices",VOICES.arabic);
+      updateActiveLabel();
+      toast("✓ Voice set to "+voice.name,"ok");
+    }
+  }catch(e){toast("Failed to save voice","err");}
+}
+
+function updateActiveLabel(){
+  const v=allVoices().find(v=>v.id===activeVoiceId);
+  const el=document.getElementById("active-voice-name");
+  if(el) el.textContent=v?(v.avCls==="av-in"?"🇮🇳":"🇦🇪")+" "+v.name+" — "+v.lang : "Custom";
+}
 </script>
 </body>
 </html>
