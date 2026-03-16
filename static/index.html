@@ -3,709 +3,352 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<title>CallSara — AI Real Estate Dialer</title>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<title>CallSara</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <style>
-:root {
-  --bg:       #0c0f14;
-  --bg2:      #10141a;
-  --surface:  #141920;
-  --surface2: #1a2030;
-  --border:   #1e2535;
-  --border2:  #252e40;
-  --gold:     #c9a84c;
-  --gold2:    #e8c97a;
-  --gold-dim: rgba(201,168,76,.12);
-  --green:    #2dd4a0;
-  --green-dim:rgba(45,212,160,.1);
-  --red:      #f06060;
-  --red-dim:  rgba(240,96,96,.1);
-  --blue:     #4a9eff;
-  --blue-dim: rgba(74,158,255,.1);
-  --amber:    #f5a623;
-  --amber-dim:rgba(245,166,35,.1);
-  --text:     #e2e8f0;
-  --text2:    #94a3b8;
-  --text3:    #4a5568;
+:root{
+  --bg:#0b0e14;--bg2:#0f1319;--s:#141a24;--s2:#1a2130;--s3:#1e2638;
+  --b:#1e2738;--b2:#253044;--b3:#2d3a50;
+  --gold:#c9a84c;--gold2:#e8c97a;--gold3:rgba(201,168,76,.15);--gold4:rgba(201,168,76,.08);
+  --green:#2dd4a0;--green2:rgba(45,212,160,.12);
+  --red:#f06060;--red2:rgba(240,96,96,.12);
+  --amber:#f5a623;--amber2:rgba(245,166,35,.12);
+  --blue:#4a9eff;--blue2:rgba(74,158,255,.12);
+  --t:#e2e8f0;--t2:#94a3b8;--t3:#4a5568;--t4:#2d3748;
+  --r:8px;--r2:12px;--r3:16px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden}
+body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-size:14px}
+
+/* ─── SIDEBAR ─────────────────────────────────────────────── */
+.sidebar{
+  position:fixed;left:0;top:0;bottom:0;width:220px;
+  background:var(--bg2);border-right:1px solid var(--b);
+  display:flex;flex-direction:column;z-index:100;
+}
+.brand{padding:22px 18px 18px;border-bottom:1px solid var(--b)}
+.brand-name{font-family:'Playfair Display',serif;font-size:18px;font-weight:700;color:var(--gold);letter-spacing:.5px}
+.brand-tag{font-size:9px;color:var(--t3);letter-spacing:2px;text-transform:uppercase;font-family:'DM Mono',monospace;margin-top:3px}
+.nav{padding:12px 8px;flex:1}
+.nav-group{font-size:9px;letter-spacing:2px;color:var(--t4);text-transform:uppercase;font-family:'DM Mono',monospace;padding:0 10px;margin:14px 0 5px}
+.nav-item{
+  display:flex;align-items:center;gap:9px;padding:9px 10px;
+  border-radius:var(--r);cursor:pointer;color:var(--t2);font-size:13px;font-weight:500;
+  transition:all .15s;margin-bottom:1px;
+}
+.nav-item:hover{background:var(--s2);color:var(--t)}
+.nav-item.active{background:var(--gold3);color:var(--gold)}
+.nav-item svg{width:15px;height:15px;flex-shrink:0;opacity:.8}
+.nav-item.active svg{opacity:1}
+.sidebar-foot{padding:14px;border-top:1px solid var(--b)}
+.live-dot{display:flex;align-items:center;gap:7px;font-size:11px;color:var(--t3);font-family:'DM Mono',monospace}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--t3);flex-shrink:0}
+.dot.on{background:var(--green);box-shadow:0 0 6px var(--green);animation:pulse 2s infinite}
+.dot.err{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ─── MAIN ────────────────────────────────────────────────── */
+.main{margin-left:220px;height:100vh;display:flex;flex-direction:column}
+.topbar{
+  height:56px;border-bottom:1px solid var(--b);padding:0 24px;
+  display:flex;align-items:center;justify-content:space-between;
+  background:var(--bg2);flex-shrink:0;
+}
+.page-title{font-family:'Playfair Display',serif;font-size:17px;font-weight:600}
+.topbar-r{display:flex;align-items:center;gap:10px}
+.agency-pill{
+  font-size:11px;color:var(--t2);background:var(--s2);
+  border:1px solid var(--b2);padding:4px 12px;border-radius:20px;
+  font-family:'DM Mono',monospace;max-width:200px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-html, body { height: 100%; }
+/* ─── PAGES ───────────────────────────────────────────────── */
+.pages{flex:1;overflow:hidden;position:relative}
+.page{
+  position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;
+  scrollbar-width:thin;scrollbar-color:var(--b2) transparent;
+  display:none;
+}
+.page.active{display:block}
+.page::-webkit-scrollbar{width:4px}
+.page::-webkit-scrollbar-thumb{background:var(--b2);border-radius:2px}
+.page-body{padding:22px 24px;max-width:1400px}
 
-body {
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'DM Sans', sans-serif;
-  font-size: 14px;
-  line-height: 1.5;
-  overflow: hidden;
+/* ─── STATS ───────────────────────────────────────────────── */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
+.stat{
+  background:var(--s);border:1px solid var(--b);border-radius:var(--r2);
+  padding:18px;position:relative;overflow:hidden;
 }
+.stat::after{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;border-radius:var(--r2) var(--r2) 0 0;
+}
+.stat.gold::after{background:linear-gradient(90deg,var(--gold),var(--gold2))}
+.stat.green::after{background:var(--green)}
+.stat.fire::after{background:linear-gradient(90deg,#ff6b35,var(--amber))}
+.stat.red::after{background:var(--red)}
+.stat-icon{font-size:18px;margin-bottom:10px;line-height:1}
+.stat-n{font-family:'Playfair Display',serif;font-size:30px;font-weight:700;line-height:1;margin-bottom:3px}
+.stat.gold  .stat-n{color:var(--gold)}
+.stat.green .stat-n{color:var(--green)}
+.stat.fire  .stat-n{color:var(--amber)}
+.stat.red   .stat-n{color:var(--red)}
+.stat-l{font-size:12px;color:var(--t2);font-weight:500}
+.stat-s{font-size:11px;color:var(--t3);margin-top:3px}
 
-/* ── NOISE TEXTURE ── */
-body::after {
-  content: '';
-  position: fixed; inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
-  pointer-events: none;
-  z-index: 9998;
-}
+/* ─── 2-COL ───────────────────────────────────────────────── */
+.two-col{display:grid;grid-template-columns:360px 1fr;gap:16px;align-items:start}
 
-/* ── SIDEBAR ── */
-.sidebar {
-  position: fixed;
-  left: 0; top: 0; bottom: 0;
-  width: 240px;
-  background: var(--surface);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  z-index: 100;
+/* ─── CARD ────────────────────────────────────────────────── */
+.card{background:var(--s);border:1px solid var(--b);border-radius:var(--r2);overflow:hidden;margin-bottom:16px}
+.card:last-child{margin-bottom:0}
+.card-hd{
+  padding:14px 18px;border-bottom:1px solid var(--b);
+  display:flex;align-items:center;justify-content:space-between;
 }
+.card-title{font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;color:var(--t)}
+.card-title svg{width:14px;height:14px;color:var(--gold)}
 
-.brand {
-  padding: 24px 20px 20px;
-  border-bottom: 1px solid var(--border);
+/* ─── DIAL ────────────────────────────────────────────────── */
+.dial-body{padding:18px}
+.fl{font-size:10px;letter-spacing:1.5px;color:var(--t3);text-transform:uppercase;
+    font-family:'DM Mono',monospace;display:block;margin-bottom:6px}
+.phone-row{display:flex;gap:8px}
+.ph-input{
+  flex:1;background:var(--bg);border:1px solid var(--b2);color:var(--t);
+  padding:9px 12px;font-family:'DM Mono',monospace;font-size:15px;
+  border-radius:var(--r);outline:none;transition:border-color .2s,box-shadow .2s;
 }
-.brand-logo {
-  font-family: 'Playfair Display', serif;
-  font-size: 20px;
-  font-weight: 700;
-  color: var(--gold);
-  letter-spacing: 0.5px;
-  line-height: 1.2;
+.ph-input:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold4)}
+.ph-input::placeholder{color:var(--t3);font-size:12px;font-family:'DM Sans',sans-serif}
+.btn{
+  display:inline-flex;align-items:center;gap:6px;padding:9px 16px;
+  border-radius:var(--r);font-size:13px;font-weight:600;cursor:pointer;
+  border:none;transition:all .15s;white-space:nowrap;
 }
-.brand-sub {
-  font-size: 10px;
-  color: var(--text3);
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  margin-top: 4px;
-  font-family: 'DM Mono', monospace;
+.btn-gold{background:var(--gold);color:#0b0e14}
+.btn-gold:hover{background:var(--gold2)}
+.btn-gold:active{transform:scale(.98)}
+.btn-gold:disabled{background:var(--b2);color:var(--t3);cursor:not-allowed;transform:none}
+.btn-outline{background:transparent;color:var(--gold);border:1px solid rgba(201,168,76,.35)}
+.btn-outline:hover{background:var(--gold3)}
+.btn-ghost{background:transparent;color:var(--t2);border:1px solid var(--b2)}
+.btn-ghost:hover{border-color:var(--b3);color:var(--t)}
+.btn-sm{padding:5px 12px;font-size:12px}
+.btn-danger{background:transparent;color:var(--red);border:1px solid rgba(240,96,96,.3)}
+.btn-danger:hover{background:var(--red2)}
+.bulk-tog{
+  display:flex;align-items:center;gap:5px;margin-top:10px;
+  font-size:12px;color:var(--t3);cursor:pointer;user-select:none;
+  transition:color .15s;
 }
-
-.nav {
-  padding: 16px 12px;
-  flex: 1;
+.bulk-tog:hover{color:var(--gold)}
+.bulk-area{display:none;margin-top:10px}
+.bulk-area.open{display:block}
+.bulk-ta{
+  width:100%;background:var(--bg);border:1px solid var(--b2);color:var(--t);
+  padding:9px 12px;font-family:'DM Mono',monospace;font-size:11px;
+  border-radius:var(--r);resize:vertical;min-height:80px;outline:none;line-height:1.8;
 }
-.nav-section {
-  font-size: 9px;
-  letter-spacing: 2px;
-  color: var(--text3);
-  text-transform: uppercase;
-  font-family: 'DM Mono', monospace;
-  padding: 0 8px;
-  margin-bottom: 6px;
-  margin-top: 16px;
-}
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 9px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-  color: var(--text2);
-  font-size: 13px;
-  font-weight: 500;
-  transition: all .15s;
-  margin-bottom: 2px;
-}
-.nav-item:hover { background: var(--surface2); color: var(--text); }
-.nav-item.active { background: var(--gold-dim); color: var(--gold); }
-.nav-item svg { width: 16px; height: 16px; flex-shrink: 0; }
-
-.sidebar-footer {
-  padding: 16px;
-  border-top: 1px solid var(--border);
-}
-.status-dot {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  color: var(--text3);
-  font-family: 'DM Mono', monospace;
-}
-.dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--text3);
-  flex-shrink: 0;
-}
-.dot.live { background: var(--green); box-shadow: 0 0 6px var(--green); animation: glow 2s infinite; }
-.dot.err  { background: var(--red); }
-@keyframes glow { 0%,100%{opacity:1}50%{opacity:.4} }
-
-/* ── MAIN ── */
-.main {
-  margin-left: 240px;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+.bulk-ta:focus{border-color:var(--gold)}
+.bulk-prog{
+  display:none;margin-top:8px;font-size:11px;color:var(--amber);
+  font-family:'DM Mono',monospace;padding:6px 10px;
+  background:var(--amber2);border-radius:var(--r);
 }
 
-/* ── TOPBAR ── */
-.topbar {
-  height: 60px;
-  border-bottom: 1px solid var(--border);
-  padding: 0 28px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--bg2);
-  flex-shrink: 0;
+/* ─── FILTER BAR ──────────────────────────────────────────── */
+.filter-bar{
+  padding:10px 18px;border-bottom:1px solid var(--b);
+  display:flex;gap:6px;align-items:center;flex-wrap:wrap;
 }
-.page-title {
-  font-family: 'Playfair Display', serif;
-  font-size: 18px;
-  font-weight: 600;
-  color: var(--text);
+.search-box{
+  background:var(--bg);border:1px solid var(--b2);color:var(--t);
+  padding:6px 10px 6px 30px;font-size:13px;border-radius:6px;
+  outline:none;width:160px;transition:border-color .2s;
+  background-image:url("data:image/svg+xml,%3Csvg width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%234a5568' stroke-width='2' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:9px center;
 }
-.topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.search-box:focus{border-color:var(--gold)}
+.ftab{
+  padding:5px 11px;border-radius:5px;font-size:12px;font-weight:500;
+  cursor:pointer;border:1px solid var(--b2);background:transparent;
+  color:var(--t2);transition:all .15s;
 }
-.agency-badge {
-  font-size: 11px;
-  color: var(--text2);
-  background: var(--surface2);
-  border: 1px solid var(--border2);
-  padding: 5px 12px;
-  border-radius: 6px;
-  font-family: 'DM Mono', monospace;
+.ftab:hover{border-color:var(--gold);color:var(--gold)}
+.ftab.on{background:var(--gold3);border-color:var(--gold);color:var(--gold)}
+.sp{flex:1}
+.hot-tog{
+  display:flex;align-items:center;gap:5px;font-size:12px;color:var(--t2);
+  cursor:pointer;padding:5px 10px;border-radius:5px;border:1px solid var(--b2);
+  transition:all .15s;
 }
+.hot-tog.on{background:var(--amber2);border-color:var(--amber);color:var(--amber)}
 
-/* ── PAGE CONTENT ── */
-.page {
-  flex: 1;
-  overflow-y: auto;
-  overflow-x: hidden;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border2) transparent;
+/* ─── CALL TABLE ──────────────────────────────────────────── */
+.tbl-head{
+  display:grid;grid-template-columns:140px 90px 110px 80px 70px 1fr 90px;
+  gap:10px;padding:9px 18px;border-bottom:1px solid var(--b);
+  font-size:9px;letter-spacing:1.5px;color:var(--t3);text-transform:uppercase;
+  font-family:'DM Mono',monospace;
 }
-.page::-webkit-scrollbar { width: 4px; }
-.page::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+.tbl-body{min-height:100px}
+.trow{
+  display:grid;grid-template-columns:140px 90px 110px 80px 70px 1fr 90px;
+  gap:10px;padding:11px 18px;border-bottom:1px solid var(--b);
+  align-items:center;cursor:pointer;transition:background .1s;
+}
+.trow:hover{background:var(--s2)}
+.trow.hot-row{border-left:2px solid var(--amber);padding-left:16px}
+.cell-phone{font-family:'DM Mono',monospace;font-size:13px;font-weight:500;color:var(--t);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell-time{font-size:11px;color:var(--t3);font-family:'DM Mono',monospace}
+.cell-dur{font-family:'DM Mono',monospace;font-size:12px;color:var(--t2)}
+.cell-acts{display:flex;gap:5px;justify-content:flex-end}
+.tbl-empty{padding:50px 18px;text-align:center;color:var(--t3)}
+.tbl-empty svg{width:36px;height:36px;margin:0 auto 10px;display:block;opacity:.25}
+.tbl-empty p{font-size:13px}
 
-.page-inner {
-  padding: 24px 28px;
-  max-width: 1400px;
+/* ─── BADGE ───────────────────────────────────────────────── */
+.badge{
+  display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:20px;
+  font-size:10px;font-weight:600;letter-spacing:.3px;text-transform:uppercase;
+  font-family:'DM Mono',monospace;white-space:nowrap;
 }
+.b-ring{background:var(--amber2);color:var(--amber);border:1px solid rgba(245,166,35,.25)}
+.b-ans{background:var(--blue2);color:var(--blue);border:1px solid rgba(74,158,255,.25)}
+.b-done{background:var(--green2);color:var(--green);border:1px solid rgba(45,212,160,.25)}
+.b-fail{background:var(--red2);color:var(--red);border:1px solid rgba(240,96,96,.25)}
+.b-hot{background:rgba(245,166,35,.15);color:var(--amber);border:1px solid rgba(245,166,35,.3)}
 
-/* ── STATS GRID ── */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
-  margin-bottom: 24px;
+/* ─── PAGINATION ──────────────────────────────────────────── */
+.pager{
+  padding:10px 18px;display:flex;align-items:center;justify-content:space-between;
+  border-top:1px solid var(--b);font-size:12px;color:var(--t3);
 }
-.stat-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 20px;
-  position: relative;
-  overflow: hidden;
-  transition: border-color .2s;
+.pager-btns{display:flex;gap:4px}
+.pbtn{
+  padding:4px 10px;border-radius:5px;border:1px solid var(--b2);
+  background:transparent;color:var(--t2);cursor:pointer;font-size:12px;transition:all .12s;
 }
-.stat-card:hover { border-color: var(--border2); }
-.stat-card::before {
-  content: '';
-  position: absolute;
-  top: 0; left: 0; right: 0;
-  height: 2px;
-  border-radius: 12px 12px 0 0;
-}
-.stat-card.gold::before  { background: linear-gradient(90deg, var(--gold), var(--gold2)); }
-.stat-card.green::before { background: linear-gradient(90deg, var(--green), #1de9b6); }
-.stat-card.red::before   { background: var(--red); }
-.stat-card.blue::before  { background: var(--blue); }
-.stat-icon {
-  width: 36px; height: 36px;
-  border-radius: 8px;
-  display: flex; align-items: center; justify-content: center;
-  margin-bottom: 12px;
-  font-size: 16px;
-}
-.stat-icon.gold  { background: var(--gold-dim);  }
-.stat-icon.green { background: var(--green-dim); }
-.stat-icon.red   { background: var(--red-dim);   }
-.stat-icon.blue  { background: var(--blue-dim);  }
-.stat-value {
-  font-family: 'Playfair Display', serif;
-  font-size: 32px;
-  font-weight: 700;
-  line-height: 1;
-  margin-bottom: 4px;
-}
-.stat-card.gold  .stat-value { color: var(--gold); }
-.stat-card.green .stat-value { color: var(--green); }
-.stat-card.red   .stat-value { color: var(--red); }
-.stat-card.blue  .stat-value { color: var(--blue); }
-.stat-label { font-size: 12px; color: var(--text2); font-weight: 500; }
-.stat-sub { font-size: 11px; color: var(--text3); margin-top: 4px; }
+.pbtn:hover{border-color:var(--gold);color:var(--gold)}
+.pbtn:disabled{opacity:.3;cursor:not-allowed}
 
-/* ── TWO-COLUMN LAYOUT ── */
-.two-col {
-  display: grid;
-  grid-template-columns: 380px 1fr;
-  gap: 20px;
-  align-items: start;
+/* ─── HOT LEADS LIST ──────────────────────────────────────── */
+.hot-item{
+  padding:11px 18px;border-bottom:1px solid var(--b);cursor:pointer;
+  display:flex;justify-content:space-between;align-items:center;
+  transition:background .12s;
 }
+.hot-item:hover{background:var(--s2)}
+.hot-phone{font-family:'DM Mono',monospace;font-size:13px;color:var(--t);font-weight:500}
+.hot-meta{font-size:11px;color:var(--t3);margin-top:2px}
+.hot-time{font-size:10px;color:var(--t3);font-family:'DM Mono',monospace}
 
-/* ── CARD ── */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  overflow: hidden;
+/* ─── MODAL ───────────────────────────────────────────────── */
+.overlay{
+  display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);
+  backdrop-filter:blur(5px);z-index:500;align-items:center;justify-content:center;
 }
-.card-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+.overlay.open{display:flex;animation:fi .2s}
+@keyframes fi{from{opacity:0}to{opacity:1}}
+.modal{
+  background:var(--s);border:1px solid var(--b2);border-radius:var(--r3);
+  width:660px;max-width:95vw;max-height:88vh;display:flex;flex-direction:column;
+  box-shadow:0 25px 70px rgba(0,0,0,.55);animation:su .25s ease;
 }
-.card-title {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  display: flex;
-  align-items: center;
-  gap: 8px;
+@keyframes su{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
+.modal-hd{
+  padding:18px 22px;border-bottom:1px solid var(--b);
+  display:flex;align-items:flex-start;justify-content:space-between;flex-shrink:0;
 }
-.card-title svg { width: 15px; height: 15px; color: var(--gold); }
+.modal-phone{font-family:'Playfair Display',serif;font-size:20px;font-weight:700;
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.modal-meta{display:flex;gap:14px;margin-top:5px;flex-wrap:wrap}
+.meta-it{font-size:11px;color:var(--t3);display:flex;align-items:center;gap:4px;font-family:'DM Mono',monospace}
+.close-x{
+  width:30px;height:30px;border-radius:7px;border:1px solid var(--b2);
+  background:transparent;color:var(--t2);cursor:pointer;font-size:17px;
+  display:flex;align-items:center;justify-content:center;transition:all .12s;flex-shrink:0;
+}
+.close-x:hover{background:var(--s2);color:var(--t)}
+.modal-body{
+  flex:1;overflow-y:auto;padding:18px 22px;
+  scrollbar-width:thin;scrollbar-color:var(--b2) transparent;
+}
+.sec-label{
+  font-size:9px;letter-spacing:2px;color:var(--t3);text-transform:uppercase;
+  font-family:'DM Mono',monospace;margin-bottom:12px;
+}
+.msg{display:flex;gap:10px;margin-bottom:12px;animation:fu .2s ease}
+@keyframes fu{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.av{
+  width:30px;height:30px;border-radius:50%;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;
+  margin-top:2px;
+}
+.av.c{background:var(--s2);color:var(--t2);border:1px solid var(--b2)}
+.av.a{background:var(--gold3);color:var(--gold);border:1px solid rgba(201,168,76,.3)}
+.msg-who{font-size:9px;color:var(--t3);margin-bottom:4px;font-weight:600;
+  letter-spacing:.5px;text-transform:uppercase}
+.bubble{
+  background:var(--s2);border:1px solid var(--b);padding:9px 13px;
+  border-radius:4px 11px 11px 11px;font-size:13px;line-height:1.65;color:var(--t);
+}
+.msg.ai .bubble{background:var(--bg2);border-color:rgba(201,168,76,.15);
+  border-radius:11px 4px 11px 11px}
+.no-msgs{text-align:center;padding:28px;color:var(--t3);font-size:13px}
+.rec-block{margin-top:18px;padding-top:18px;border-top:1px solid var(--b)}
+.rec-link{
+  display:inline-flex;align-items:center;gap:7px;padding:8px 14px;
+  background:var(--gold3);border:1px solid rgba(201,168,76,.3);
+  border-radius:var(--r);color:var(--gold);font-size:12px;font-weight:600;
+  text-decoration:none;transition:all .15s;
+}
+.rec-link:hover{background:rgba(201,168,76,.22)}
+.loading-t{text-align:center;padding:24px;color:var(--t3);font-size:12px;font-family:'DM Mono',monospace}
 
-/* ── DIAL FORM ── */
-.dial-form { padding: 20px; border-bottom: 1px solid var(--border); }
-.field-label {
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  color: var(--text3);
-  text-transform: uppercase;
-  font-family: 'DM Mono', monospace;
-  display: block;
-  margin-bottom: 8px;
+/* ─── SETTINGS PAGE ───────────────────────────────────────── */
+.settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.settings-full{grid-column:1/-1}
+.field-group{margin-bottom:18px}
+.field-group:last-child{margin-bottom:0}
+.f-label{font-size:11px;color:var(--t2);font-weight:600;margin-bottom:6px;display:block}
+.f-sub{font-size:11px;color:var(--t3);margin-bottom:6px}
+.f-input{
+  width:100%;background:var(--bg);border:1px solid var(--b2);color:var(--t);
+  padding:9px 12px;font-size:14px;border-radius:var(--r);outline:none;
+  transition:border-color .2s,box-shadow .2s;font-family:'DM Sans',sans-serif;
 }
-.phone-row { display: flex; gap: 8px; }
-.phone-input {
-  flex: 1;
-  background: var(--bg);
-  border: 1px solid var(--border2);
-  color: var(--text);
-  padding: 10px 14px;
-  font-family: 'DM Mono', monospace;
-  font-size: 15px;
-  border-radius: 8px;
-  outline: none;
-  transition: border-color .2s, box-shadow .2s;
+.f-input:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold4)}
+.f-textarea{
+  width:100%;background:var(--bg);border:1px solid var(--b2);color:var(--t);
+  padding:10px 12px;font-size:13px;border-radius:var(--r);outline:none;
+  transition:border-color .2s,box-shadow .2s;font-family:'DM Mono',monospace;
+  resize:vertical;line-height:1.6;
 }
-.phone-input:focus {
-  border-color: var(--gold);
-  box-shadow: 0 0 0 3px var(--gold-dim);
+.f-textarea:focus{border-color:var(--gold);box-shadow:0 0 0 3px var(--gold4)}
+.save-bar{
+  display:flex;align-items:center;gap:10px;padding-top:14px;
+  border-top:1px solid var(--b);margin-top:6px;
 }
-.phone-input::placeholder { color: var(--text3); font-size: 12px; font-family: 'DM Sans', sans-serif; }
+.save-msg{font-size:12px;color:var(--green);display:none}
+.save-msg.show{display:block}
 
-.btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 10px 18px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  border: none;
-  transition: all .15s;
-  white-space: nowrap;
+/* ─── TOAST ───────────────────────────────────────────────── */
+#toast{
+  position:fixed;bottom:22px;right:22px;padding:11px 16px;
+  background:var(--s);border:1px solid var(--b2);border-radius:10px;
+  font-size:13px;transform:translateY(60px);opacity:0;transition:all .3s;
+  z-index:9999;box-shadow:0 8px 28px rgba(0,0,0,.4);max-width:310px;
+  display:flex;align-items:center;gap:8px;
 }
-.btn-gold {
-  background: var(--gold);
-  color: #0c0f14;
-}
-.btn-gold:hover { background: var(--gold2); }
-.btn-gold:active { transform: scale(.98); }
-.btn-gold:disabled { background: var(--border2); color: var(--text3); cursor: not-allowed; transform: none; }
-.btn-outline {
-  background: transparent;
-  color: var(--gold);
-  border: 1px solid rgba(201,168,76,.3);
-}
-.btn-outline:hover { background: var(--gold-dim); }
-
-/* Bulk */
-.bulk-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--text3);
-  cursor: pointer;
-  user-select: none;
-  transition: color .15s;
-}
-.bulk-toggle:hover { color: var(--gold); }
-.bulk-area { display: none; margin-top: 12px; }
-.bulk-area.open { display: block; }
-.bulk-textarea {
-  width: 100%;
-  background: var(--bg);
-  border: 1px solid var(--border2);
-  color: var(--text);
-  padding: 10px 14px;
-  font-family: 'DM Mono', monospace;
-  font-size: 12px;
-  border-radius: 8px;
-  resize: vertical;
-  min-height: 80px;
-  outline: none;
-  line-height: 1.8;
-}
-.bulk-textarea:focus { border-color: var(--gold); }
-.bulk-progress {
-  display: none;
-  margin-top: 8px;
-  font-size: 11px;
-  color: var(--amber);
-  font-family: 'DM Mono', monospace;
-  padding: 6px 10px;
-  background: var(--amber-dim);
-  border-radius: 6px;
-}
-
-/* ── FILTER BAR ── */
-.filter-bar {
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  flex-wrap: wrap;
-}
-.search-input {
-  background: var(--bg);
-  border: 1px solid var(--border2);
-  color: var(--text);
-  padding: 7px 12px 7px 32px;
-  font-size: 13px;
-  border-radius: 7px;
-  outline: none;
-  width: 180px;
-  transition: border-color .2s;
-  background-image: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%234a5568' stroke-width='2' xmlns='http://www.w3.org/2000/svg'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: 10px center;
-}
-.search-input:focus { border-color: var(--gold); }
-.filter-btn {
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 500;
-  cursor: pointer;
-  border: 1px solid var(--border2);
-  background: transparent;
-  color: var(--text2);
-  transition: all .15s;
-}
-.filter-btn:hover { border-color: var(--gold); color: var(--gold); }
-.filter-btn.active { background: var(--gold-dim); border-color: var(--gold); color: var(--gold); }
-.spacer { flex: 1; }
-.hot-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text2);
-  cursor: pointer;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--border2);
-  transition: all .15s;
-}
-.hot-toggle.active { background: var(--amber-dim); border-color: var(--amber); color: var(--amber); }
-
-/* ── CALL TABLE ── */
-.call-table { width: 100%; }
-.call-table-header {
-  display: grid;
-  grid-template-columns: 140px 80px 100px 90px 1fr 80px;
-  gap: 12px;
-  padding: 10px 20px;
-  border-bottom: 1px solid var(--border);
-  font-size: 10px;
-  letter-spacing: 1.5px;
-  color: var(--text3);
-  text-transform: uppercase;
-  font-family: 'DM Mono', monospace;
-}
-.call-row {
-  display: grid;
-  grid-template-columns: 140px 80px 100px 90px 1fr 80px;
-  gap: 12px;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border);
-  align-items: center;
-  cursor: pointer;
-  transition: background .12s;
-}
-.call-row:hover { background: var(--surface2); }
-.call-row.selected { background: var(--gold-dim); }
-.call-row.selected:hover { background: var(--gold-dim); }
-.cell-phone {
-  font-family: 'DM Mono', monospace;
-  font-size: 13px;
-  color: var(--text);
-  font-weight: 500;
-}
-.cell-phone.hot::before {
-  content: '🔥 ';
-  font-size: 11px;
-}
-.cell-time { font-size: 11px; color: var(--text3); font-family: 'DM Mono', monospace; }
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 9px;
-  border-radius: 20px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: .5px;
-  text-transform: uppercase;
-  font-family: 'DM Mono', monospace;
-  white-space: nowrap;
-}
-.b-ring    { background: var(--amber-dim);  color: var(--amber);  border: 1px solid rgba(245,166,35,.25); }
-.b-ans     { background: var(--blue-dim);   color: var(--blue);   border: 1px solid rgba(74,158,255,.25); }
-.b-done    { background: var(--green-dim);  color: var(--green);  border: 1px solid rgba(45,212,160,.25); }
-.b-fail    { background: var(--red-dim);    color: var(--red);    border: 1px solid rgba(240,96,96,.25); }
-.b-hot     { background: var(--gold-dim);   color: var(--gold);   border: 1px solid rgba(201,168,76,.3); }
-.cell-dur  { font-family: 'DM Mono', monospace; font-size: 12px; color: var(--text2); }
-.cell-act  { display: flex; gap: 6px; }
-.action-btn {
-  padding: 4px 10px;
-  border-radius: 5px;
-  font-size: 11px;
-  cursor: pointer;
-  border: 1px solid var(--border2);
-  background: transparent;
-  color: var(--text2);
-  transition: all .12s;
-  font-weight: 500;
-}
-.action-btn:hover { border-color: var(--gold); color: var(--gold); background: var(--gold-dim); }
-.empty-table {
-  padding: 60px 20px;
-  text-align: center;
-  color: var(--text3);
-}
-.empty-table svg { width: 40px; height: 40px; margin: 0 auto 12px; display: block; opacity: .3; }
-.empty-table p { font-size: 13px; }
-
-/* ── PAGINATION ── */
-.pagination {
-  padding: 12px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-  color: var(--text3);
-}
-.page-btns { display: flex; gap: 4px; }
-.page-btn {
-  padding: 4px 10px;
-  border-radius: 5px;
-  border: 1px solid var(--border2);
-  background: transparent;
-  color: var(--text2);
-  cursor: pointer;
-  font-size: 12px;
-  transition: all .12s;
-}
-.page-btn:hover { border-color: var(--gold); color: var(--gold); }
-.page-btn:disabled { opacity: .3; cursor: not-allowed; }
-
-/* ── DETAIL PANEL (modal) ── */
-.detail-overlay {
-  display: none;
-  position: fixed; inset: 0;
-  background: rgba(0,0,0,.6);
-  backdrop-filter: blur(4px);
-  z-index: 500;
-  animation: fadein .2s;
-}
-.detail-overlay.open { display: flex; align-items: center; justify-content: center; }
-@keyframes fadein { from{opacity:0}to{opacity:1} }
-.detail-panel {
-  background: var(--surface);
-  border: 1px solid var(--border2);
-  border-radius: 16px;
-  width: 680px;
-  max-width: 95vw;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 25px 60px rgba(0,0,0,.5);
-  animation: slideup .25s ease;
-}
-@keyframes slideup { from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1} }
-.detail-head {
-  padding: 20px 24px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  flex-shrink: 0;
-}
-.detail-phone {
-  font-family: 'Playfair Display', serif;
-  font-size: 22px;
-  font-weight: 700;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.detail-meta {
-  display: flex;
-  gap: 16px;
-  margin-top: 6px;
-  flex-wrap: wrap;
-}
-.meta-item {
-  font-size: 11px;
-  color: var(--text3);
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-family: 'DM Mono', monospace;
-}
-.close-btn {
-  width: 32px; height: 32px;
-  border-radius: 8px;
-  border: 1px solid var(--border2);
-  background: transparent;
-  color: var(--text2);
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: all .12s;
-  font-size: 18px;
-  flex-shrink: 0;
-}
-.close-btn:hover { background: var(--surface2); color: var(--text); }
-
-.detail-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 20px 24px;
-  scrollbar-width: thin;
-  scrollbar-color: var(--border2) transparent;
-}
-.transcript-header {
-  font-size: 10px;
-  letter-spacing: 2px;
-  color: var(--text3);
-  text-transform: uppercase;
-  font-family: 'DM Mono', monospace;
-  margin-bottom: 16px;
-}
-.msg {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 14px;
-  animation: fadeUp .2s ease;
-}
-@keyframes fadeUp { from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)} }
-.msg-avatar {
-  width: 32px; height: 32px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
-  margin-top: 2px;
-}
-.msg-avatar.cust { background: var(--surface2); color: var(--text2); border: 1px solid var(--border2); }
-.msg-avatar.ai   { background: var(--gold-dim); color: var(--gold);  border: 1px solid rgba(201,168,76,.3); }
-.msg-content { flex: 1; }
-.msg-name { font-size: 10px; color: var(--text3); margin-bottom: 5px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase; }
-.msg-bubble {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  padding: 10px 14px;
-  border-radius: 4px 12px 12px 12px;
-  font-size: 13px;
-  line-height: 1.65;
-  color: var(--text);
-}
-.msg.ai .msg-bubble {
-  background: var(--bg2);
-  border-color: rgba(201,168,76,.15);
-  border-radius: 12px 4px 12px 12px;
-}
-.no-msgs {
-  text-align: center;
-  padding: 32px;
-  color: var(--text3);
-  font-size: 13px;
-}
-.recording-block {
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px solid var(--border);
-}
-.rec-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 9px 16px;
-  background: var(--gold-dim);
-  border: 1px solid rgba(201,168,76,.3);
-  border-radius: 8px;
-  color: var(--gold);
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
-  transition: all .15s;
-}
-.rec-link:hover { background: rgba(201,168,76,.2); }
-.loading-msgs {
-  text-align: center;
-  padding: 24px;
-  color: var(--text3);
-  font-size: 12px;
-  font-family: 'DM Mono', monospace;
-}
-
-/* ── TOAST ── */
-#toast {
-  position: fixed;
-  bottom: 24px; right: 24px;
-  padding: 12px 18px;
-  background: var(--surface);
-  border: 1px solid var(--border2);
-  border-radius: 10px;
-  font-size: 13px;
-  transform: translateY(70px);
-  opacity: 0;
-  transition: all .3s ease;
-  z-index: 9999;
-  box-shadow: 0 8px 24px rgba(0,0,0,.4);
-  max-width: 320px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-#toast.show { transform: translateY(0); opacity: 1; }
-#toast.ok   { border-color: rgba(45,212,160,.4); color: var(--green); }
-#toast.err  { border-color: rgba(240,96,96,.4);  color: var(--red); }
-#toast.info { border-color: rgba(201,168,76,.4); color: var(--gold); }
+#toast.show{transform:translateY(0);opacity:1}
+#toast.ok{border-color:rgba(45,212,160,.4);color:var(--green)}
+#toast.err{border-color:rgba(240,96,96,.4);color:var(--red)}
+#toast.info{border-color:rgba(201,168,76,.4);color:var(--gold)}
 </style>
 </head>
 <body>
@@ -713,194 +356,326 @@ body::after {
 <!-- SIDEBAR -->
 <nav class="sidebar">
   <div class="brand">
-    <div class="brand-logo">CallSara</div>
-    <div class="brand-sub">AI Real Estate Dialer</div>
+    <div class="brand-name">CallSara</div>
+    <div class="brand-tag" id="agencyTag">AI Real Estate Dialer</div>
   </div>
   <div class="nav">
-    <div class="nav-section">Main</div>
-    <div class="nav-item active" onclick="showPage('dashboard')">
+    <div class="nav-group">Main</div>
+    <div class="nav-item active" data-page="dashboard" onclick="goPage('dashboard',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       Dashboard
     </div>
-    <div class="nav-item" onclick="showPage('calls')">
+    <div class="nav-item" data-page="calls" onclick="goPage('calls',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
       All Calls
     </div>
-    <div class="nav-item" onclick="showPage('hot')">
+    <div class="nav-item" data-page="hot" onclick="goPage('hot',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
       Hot Leads
     </div>
-    <div class="nav-section">Actions</div>
-    <div class="nav-item" onclick="focusDial()">
+    <div class="nav-group">Tools</div>
+    <div class="nav-item" data-page="dialer" onclick="goPage('dialer',this)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
       New Call
     </div>
-    <div class="nav-item" onclick="toggleBulk()">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
-      Bulk Dial
+    <div class="nav-item" data-page="settings" onclick="goPage('settings',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
+      Settings
     </div>
   </div>
-  <div class="sidebar-footer">
-    <div class="status-dot">
-      <div class="dot" id="sidebarDot"></div>
-      <span id="sidebarStatus">Checking...</span>
+  <div class="sidebar-foot">
+    <div class="live-dot">
+      <div class="dot" id="liveDot"></div>
+      <span id="liveLabel">Checking...</span>
     </div>
   </div>
 </nav>
 
 <!-- MAIN -->
 <div class="main">
-  <!-- TOPBAR -->
   <div class="topbar">
-    <div class="page-title" id="pageTitle">Dashboard</div>
-    <div class="topbar-right">
-      <div class="agency-badge" id="agencyBadge">—</div>
-      <button class="btn btn-gold" onclick="focusDial(); showPage('dashboard')">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
-        New Call
+    <div class="page-title" id="pgTitle">Dashboard</div>
+    <div class="topbar-r">
+      <div class="agency-pill" id="agencyPill">—</div>
+      <button class="btn btn-gold btn-sm" onclick="goPage('dialer',document.querySelector('[data-page=dialer]'))">
+        📞 New Call
       </button>
     </div>
   </div>
 
-  <!-- PAGE CONTENT -->
-  <div class="page">
-    <div class="page-inner">
+  <div class="pages">
 
-      <!-- STATS -->
-      <div class="stats-grid">
-        <div class="stat-card gold">
-          <div class="stat-icon gold">📞</div>
-          <div class="stat-value" id="statTotal">0</div>
-          <div class="stat-label">Total Calls</div>
-          <div class="stat-sub" id="statToday">0 today</div>
+    <!-- ══ DASHBOARD ══════════════════════════════════════════════ -->
+    <div class="page active" id="p-dashboard">
+      <div class="page-body">
+        <div class="stats">
+          <div class="stat gold">
+            <div class="stat-icon">📞</div>
+            <div class="stat-n" id="st-total">0</div>
+            <div class="stat-l">Total Calls</div>
+            <div class="stat-s" id="st-today">0 today</div>
+          </div>
+          <div class="stat green">
+            <div class="stat-icon">✅</div>
+            <div class="stat-n" id="st-ans">0</div>
+            <div class="stat-l">Answered</div>
+            <div class="stat-s" id="st-avg">avg —</div>
+          </div>
+          <div class="stat fire">
+            <div class="stat-icon">🔥</div>
+            <div class="stat-n" id="st-hot">0</div>
+            <div class="stat-l">Hot Leads</div>
+            <div class="stat-s" id="st-hot-today">0 today</div>
+          </div>
+          <div class="stat red">
+            <div class="stat-icon">📵</div>
+            <div class="stat-n" id="st-fail">0</div>
+            <div class="stat-l">No Answer</div>
+            <div class="stat-s" id="st-ring">0 ringing</div>
+          </div>
         </div>
-        <div class="stat-card green">
-          <div class="stat-icon green">✅</div>
-          <div class="stat-value" id="statAnswered">0</div>
-          <div class="stat-label">Answered</div>
-          <div class="stat-sub" id="statAvgDur">avg 0s</div>
-        </div>
-        <div class="stat-card red" style="--red:#c9a84c;--red-dim:rgba(201,168,76,.1)">
-          <div class="stat-icon" style="background:var(--gold-dim)">🔥</div>
-          <div class="stat-value" style="color:var(--gold)" id="statHot">0</div>
-          <div class="stat-label">Hot Leads</div>
-          <div class="stat-sub" id="statHotToday">0 today</div>
-        </div>
-        <div class="stat-card red">
-          <div class="stat-icon red">📵</div>
-          <div class="stat-value" id="statFailed">0</div>
-          <div class="stat-label">No Answer</div>
-          <div class="stat-sub" id="statRinging">0 ringing</div>
+
+        <div class="two-col">
+          <!-- LEFT -->
+          <div>
+            <!-- Quick dial -->
+            <div class="card">
+              <div class="card-hd">
+                <div class="card-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+                  Quick Dial
+                </div>
+              </div>
+              <div class="dial-body">
+                <label class="fl">Phone Number</label>
+                <div class="phone-row">
+                  <input id="qPhoneInput" class="ph-input" type="tel" placeholder="+971 50 123 4567"/>
+                  <button class="btn btn-gold" id="qCallBtn" onclick="makeCall('qPhoneInput','qCallBtn')">Call</button>
+                </div>
+              </div>
+            </div>
+            <!-- Hot leads widget -->
+            <div class="card">
+              <div class="card-hd">
+                <div class="card-title">🔥 Hot Leads</div>
+                <button class="btn btn-ghost btn-sm" onclick="goPage('hot',document.querySelector('[data-page=hot]'))">View all</button>
+              </div>
+              <div id="hotWidget" style="max-height:280px;overflow-y:auto">
+                <div class="tbl-empty" style="padding:24px 18px"><p>No hot leads yet</p></div>
+              </div>
+            </div>
+          </div>
+          <!-- RIGHT: recent calls -->
+          <div class="card" style="margin-bottom:0">
+            <div class="card-hd">
+              <div class="card-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Recent Calls
+              </div>
+            </div>
+            <div class="filter-bar" id="db-filters">
+              <input class="search-box" id="db-search" placeholder="Search..." oninput="dbSearch()"/>
+              <button class="ftab on" onclick="dbFilter('all',this)">All</button>
+              <button class="ftab" onclick="dbFilter('answered',this)">Answered</button>
+              <button class="ftab" onclick="dbFilter('completed',this)">Completed</button>
+              <button class="ftab" onclick="dbFilter('no-answer',this)">No Answer</button>
+              <div class="sp"></div>
+              <div class="hot-tog" id="db-hot-tog" onclick="dbToggleHot()">🔥 Hot only</div>
+            </div>
+            <div class="tbl-head">
+              <span>Phone</span><span>Status</span><span>Date & Time</span>
+              <span>Duration</span><span>Lead</span><span>Transcript</span><span>Actions</span>
+            </div>
+            <div class="tbl-body" id="db-tbl"></div>
+            <div class="pager" id="db-pager" style="display:none">
+              <span id="db-pg-info"></span>
+              <div class="pager-btns">
+                <button class="pbtn" id="db-prev" onclick="dbPrev()">← Prev</button>
+                <button class="pbtn" id="db-next" onclick="dbNext()">Next →</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
+    </div>
 
-      <!-- TWO COL -->
-      <div class="two-col">
-
-        <!-- LEFT: DIAL + RECENT -->
-        <div>
-          <!-- DIAL CARD -->
-          <div class="card" style="margin-bottom:16px">
-            <div class="card-header">
-              <div class="card-title">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
-                Outbound Dialer
-              </div>
-            </div>
-            <div class="dial-form">
-              <label class="field-label">Phone Number</label>
-              <div class="phone-row">
-                <input id="phoneInput" class="phone-input" type="tel" placeholder="+971 50 123 4567" autocomplete="off"/>
-                <button class="btn btn-gold" id="callBtn" onclick="makeCall()">Call</button>
-              </div>
-              <div class="bulk-toggle" id="bulkToggle" onclick="toggleBulk()">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-                Bulk dial — paste multiple numbers
-              </div>
-              <div class="bulk-area" id="bulkArea">
-                <textarea class="bulk-textarea" id="bulkInput"
-                  placeholder="+971501234567&#10;+971509876543&#10;+919876543210&#10;+447911123456"></textarea>
-                <div style="display:flex;gap:8px;margin-top:8px">
-                  <button class="btn btn-outline" style="flex:1;justify-content:center" onclick="bulkCall()">
-                    Start Bulk Calling
-                  </button>
-                </div>
-                <div class="bulk-progress" id="bulkProgress"></div>
-              </div>
-            </div>
-          </div>
-
-          <!-- HOT LEADS QUICK VIEW -->
-          <div class="card">
-            <div class="card-header">
-              <div class="card-title">🔥 Hot Leads</div>
-              <button class="action-btn" onclick="showPage('hot')">View all</button>
-            </div>
-            <div id="hotLeadsList" style="max-height:300px;overflow-y:auto">
-              <div class="empty-table" style="padding:30px 20px">
-                <p style="color:var(--text3);font-size:12px">No hot leads yet</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- RIGHT: ALL CALLS TABLE -->
-        <div class="card">
-          <div class="card-header">
+    <!-- ══ ALL CALLS ══════════════════════════════════════════════ -->
+    <div class="page" id="p-calls">
+      <div class="page-body">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-hd">
             <div class="card-title">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              Recent Calls
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+              All Calls
             </div>
+            <div style="font-size:12px;color:var(--t3)" id="calls-count-label">Loading...</div>
           </div>
           <div class="filter-bar">
-            <input class="search-input" id="searchInput" placeholder="Search number..." oninput="onSearch()"/>
-            <button class="filter-btn active" onclick="setFilter('all',this)">All</button>
-            <button class="filter-btn" onclick="setFilter('answered',this)">Answered</button>
-            <button class="filter-btn" onclick="setFilter('completed',this)">Completed</button>
-            <button class="filter-btn" onclick="setFilter('no-answer',this)">No Answer</button>
-            <div class="spacer"></div>
-            <div class="hot-toggle" id="hotToggle" onclick="toggleHotOnly()">🔥 Hot only</div>
+            <input class="search-box" id="calls-search" placeholder="Search..." oninput="callsSearch()"/>
+            <button class="ftab on" onclick="callsFilter('all',this)">All</button>
+            <button class="ftab" onclick="callsFilter('answered',this)">Answered</button>
+            <button class="ftab" onclick="callsFilter('completed',this)">Completed</button>
+            <button class="ftab" onclick="callsFilter('no-answer',this)">No Answer</button>
+            <button class="ftab" onclick="callsFilter('busy',this)">Busy</button>
+            <div class="sp"></div>
+            <div class="hot-tog" id="calls-hot-tog" onclick="callsToggleHot()">🔥 Hot only</div>
           </div>
-          <div class="call-table-header">
-            <span>Phone</span>
-            <span>Status</span>
-            <span>Date & Time</span>
-            <span>Duration</span>
-            <span>Lead</span>
-            <span>Actions</span>
+          <div class="tbl-head">
+            <span>Phone</span><span>Status</span><span>Date & Time</span>
+            <span>Duration</span><span>Lead</span><span>Transcript</span><span>Actions</span>
           </div>
-          <div id="callTableBody">
-            <div class="empty-table">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
-              <p>No calls yet. Use the dialer to get started.</p>
-            </div>
-          </div>
-          <div class="pagination" id="pagination" style="display:none">
-            <span id="paginationInfo"></span>
-            <div class="page-btns">
-              <button class="page-btn" id="prevBtn" onclick="prevPage()">← Prev</button>
-              <button class="page-btn" id="nextBtn" onclick="nextPage()">Next →</button>
+          <div class="tbl-body" id="calls-tbl"></div>
+          <div class="pager" id="calls-pager" style="display:none">
+            <span id="calls-pg-info"></span>
+            <div class="pager-btns">
+              <button class="pbtn" id="calls-prev" onclick="callsPrev()">← Prev</button>
+              <button class="pbtn" id="calls-next" onclick="callsNext()">Next →</button>
             </div>
           </div>
         </div>
-
       </div>
     </div>
-  </div>
-</div>
 
-<!-- DETAIL MODAL -->
-<div class="detail-overlay" id="detailOverlay" onclick="closeDetail(event)">
-  <div class="detail-panel" id="detailPanel">
-    <div class="detail-head">
+    <!-- ══ HOT LEADS ═════════════════════════════════════════════ -->
+    <div class="page" id="p-hot">
+      <div class="page-body">
+        <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+          <div class="stat fire">
+            <div class="stat-icon">🔥</div>
+            <div class="stat-n" id="hl-count">0</div>
+            <div class="stat-l">Total Hot Leads</div>
+          </div>
+          <div class="stat gold">
+            <div class="stat-icon">📅</div>
+            <div class="stat-n" id="hl-today">0</div>
+            <div class="stat-l">Today</div>
+          </div>
+          <div class="stat green">
+            <div class="stat-icon">⏱</div>
+            <div class="stat-n" id="hl-avg">—</div>
+            <div class="stat-l">Avg Duration</div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <div class="card-hd">
+            <div class="card-title">🔥 Hot Leads — All Time</div>
+          </div>
+          <div class="tbl-head">
+            <span>Phone</span><span>Status</span><span>Date & Time</span>
+            <span>Duration</span><span>Lead</span><span>Transcript</span><span>Actions</span>
+          </div>
+          <div class="tbl-body" id="hot-tbl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ DIALER ════════════════════════════════════════════════ -->
+    <div class="page" id="p-dialer">
+      <div class="page-body">
+        <div style="max-width:520px">
+          <div class="card">
+            <div class="card-hd"><div class="card-title">📞 Single Call</div></div>
+            <div class="dial-body">
+              <label class="fl">Phone Number (with country code)</label>
+              <div class="phone-row">
+                <input id="sPhoneInput" class="ph-input" type="tel" placeholder="+971 50 123 4567"/>
+                <button class="btn btn-gold" id="sCallBtn" onclick="makeCall('sPhoneInput','sCallBtn')">Call Now</button>
+              </div>
+              <div style="margin-top:10px;font-size:12px;color:var(--t3)">
+                Calling from <span id="fromNum" style="color:var(--t2);font-family:'DM Mono',monospace">—</span>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><div class="card-title">📋 Bulk Dial</div></div>
+            <div class="dial-body">
+              <label class="fl">Phone Numbers (one per line)</label>
+              <textarea class="bulk-ta" id="bulkInput" rows="6"
+                placeholder="+971501234567&#10;+971509876543&#10;+919876543210&#10;+447911123456"></textarea>
+              <div style="display:flex;gap:8px;margin-top:10px">
+                <button class="btn btn-gold" style="flex:1;justify-content:center" onclick="bulkCall()">
+                  Start Bulk Calling
+                </button>
+              </div>
+              <div class="bulk-prog" id="bulkProg"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SETTINGS ══════════════════════════════════════════════ -->
+    <div class="page" id="p-settings">
+      <div class="page-body">
+        <div style="max-width:900px">
+
+          <!-- Agent Identity -->
+          <div class="card">
+            <div class="card-hd"><div class="card-title">👤 Agent Identity</div></div>
+            <div class="dial-body">
+              <div class="settings-grid">
+                <div class="field-group">
+                  <label class="f-label">Agent Name</label>
+                  <div class="f-sub">The name the AI introduces itself as on calls</div>
+                  <input class="f-input" id="s-agent-name" placeholder="Sara"/>
+                </div>
+                <div class="field-group">
+                  <label class="f-label">Agency Name</label>
+                  <div class="f-sub">Your real estate company name</div>
+                  <input class="f-input" id="s-agency-name" placeholder="Prestige Properties Dubai"/>
+                </div>
+                <div class="field-group settings-full">
+                  <label class="f-label">Intro Message</label>
+                  <div class="f-sub">First thing Sara says when call is answered. Leave blank to auto-generate from agent/agency name.</div>
+                  <input class="f-input" id="s-intro-text"
+                    placeholder="Hello, this is Sara calling from Prestige Properties Dubai..."/>
+                </div>
+              </div>
+              <div class="save-bar">
+                <button class="btn btn-gold" onclick="saveIdentity()">Save Identity</button>
+                <span class="save-msg" id="identity-saved">✓ Saved</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- System Prompt -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="card-title">🤖 AI System Prompt</div>
+              <button class="btn btn-ghost btn-sm" onclick="resetPrompt()">Reset to default</button>
+            </div>
+            <div class="dial-body">
+              <div class="field-group">
+                <label class="f-label">System Prompt</label>
+                <div class="f-sub">Controls how Sara behaves, what language to use, when to end the call, and how to detect hot leads.</div>
+                <textarea class="f-textarea" id="s-system-prompt" rows="22"></textarea>
+              </div>
+              <div class="save-bar">
+                <button class="btn btn-gold" onclick="savePrompt()">Save Prompt</button>
+                <span class="save-msg" id="prompt-saved">✓ Saved — next call will use new prompt</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /pages -->
+</div><!-- /main -->
+
+<!-- CALL DETAIL MODAL -->
+<div class="overlay" id="detailOverlay" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-hd">
       <div>
-        <div class="detail-phone" id="detailPhone">—</div>
-        <div class="detail-meta" id="detailMeta"></div>
+        <div class="modal-phone" id="m-phone">—</div>
+        <div class="modal-meta" id="m-meta"></div>
       </div>
-      <button class="close-btn" onclick="closeDetail()">×</button>
+      <button class="close-x" onclick="closeModal()">×</button>
     </div>
-    <div class="detail-body" id="detailBody">
-      <div class="loading-msgs">Loading transcript...</div>
+    <div class="modal-body" id="m-body">
+      <div class="loading-t">Loading transcript...</div>
     </div>
   </div>
 </div>
@@ -908,327 +683,477 @@ body::after {
 <div id="toast"></div>
 
 <script>
-// ── STATE ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// STATE
+// ══════════════════════════════════════════════════════════════
 let agentName = 'Sara';
-let currentFilter = 'all';
-let hotOnly = false;
-let searchVal = '';
-let currentPage = 0;
-let pageSize = 20;
-let totalCalls = 0;
-let searchTimer = null;
+let fromNum   = '';
 
-// ── INIT ───────────────────────────────────────────────────────────────────
+// Dashboard table state
+let db = { filter:'all', hot:false, search:'', page:0, size:20, total:0 };
+// Calls page state
+let cl = { filter:'all', hot:false, search:'', page:0, size:30, total:0 };
+// Search debounce timers
+let dbTimer=null, clTimer=null;
+
+// ══════════════════════════════════════════════════════════════
+// INIT
+// ══════════════════════════════════════════════════════════════
 async function init() {
   await loadStatus();
-  await refreshAll();
-  setInterval(refreshAll, 4000);
-  document.getElementById('phoneInput').addEventListener('keydown', e => {
-    if (e.key === 'Enter') makeCall();
+  await Promise.all([loadStats(), loadTableData('db'), loadHotWidget()]);
+  setInterval(tick, 4000);
+  document.getElementById('qPhoneInput').addEventListener('keydown', e => {
+    if(e.key==='Enter') makeCall('qPhoneInput','qCallBtn');
   });
+  document.getElementById('sPhoneInput').addEventListener('keydown', e => {
+    if(e.key==='Enter') makeCall('sPhoneInput','sCallBtn');
+  });
+}
+
+async function tick() {
+  await Promise.all([loadStats(), loadTableData('db'), loadHotWidget()]);
+  const activePage = document.querySelector('.page.active')?.id;
+  if(activePage==='p-calls') await loadTableData('cl');
+  if(activePage==='p-hot')   await loadHotPage();
 }
 
 async function loadStatus() {
   try {
     const d = await api('/api/status');
     agentName = d.agent || 'Sara';
-    document.getElementById('agencyBadge').textContent = d.agency || '';
-    document.title = (d.agency || 'CallSara') + ' — AI Dialer';
-    const dot = document.getElementById('sidebarDot');
-    const lbl = document.getElementById('sidebarStatus');
-    if (d.twilio_configured) {
-      dot.className = 'dot live';
-      lbl.textContent = d.from_number || 'Live';
+    fromNum   = d.from_number || '';
+    document.getElementById('agencyPill').textContent = d.agency || '';
+    document.getElementById('agencyTag').textContent  = d.agency || 'AI Dialer';
+    document.title = (d.agency||'CallSara') + ' — AI Dialer';
+    const elFrom = document.getElementById('fromNum');
+    if(elFrom) elFrom.textContent = d.from_number || '—';
+    const dot = document.getElementById('liveDot');
+    const lbl = document.getElementById('liveLabel');
+    if(d.twilio_configured) {
+      dot.className='dot on'; lbl.textContent=d.from_number||'Live';
     } else {
-      dot.className = 'dot err';
-      lbl.textContent = 'Token Missing';
+      dot.className='dot err'; lbl.textContent='Token Missing';
     }
   } catch(e) {
-    document.getElementById('sidebarStatus').textContent = 'Server error';
+    document.getElementById('liveLabel').textContent='Server Error';
   }
 }
 
-async function refreshAll() {
-  await Promise.all([loadStats(), loadCalls()]);
-}
-
-// ── STATS ──────────────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════
+// STATS
+// ══════════════════════════════════════════════════════════════
 async function loadStats() {
   try {
     const s = await api('/api/stats');
-    setText('statTotal',    s.total_calls || 0);
-    setText('statAnswered', s.answered || 0);
-    setText('statHot',      s.hot_leads || 0);
-    setText('statFailed',   s.no_answer || 0);
-    setText('statToday',    (s.calls_today || 0) + ' today');
-    setText('statHotToday', (s.hot_leads_today || 0) + ' today');
-    setText('statRinging',  (s.ringing || 0) + ' ringing');
-    const avg = s.avg_duration_sec || 0;
-    setText('statAvgDur', avg > 0 ? 'avg ' + fmtDur(avg) : 'avg —');
-  } catch(e) {}
+    set('st-total',   s.total_calls||0);
+    set('st-ans',     s.answered||0);
+    set('st-hot',     s.hot_leads||0);
+    set('st-fail',    s.no_answer||0);
+    set('st-today',   (s.calls_today||0)+' today');
+    set('st-hot-today',(s.hot_leads_today||0)+' today');
+    set('st-ring',    (s.ringing||0)+' ringing');
+    const avg = s.avg_duration_sec||0;
+    set('st-avg', avg>0 ? 'avg '+fmtDur(avg) : 'avg —');
+    // Hot leads page stats
+    set('hl-count', s.hot_leads||0);
+    set('hl-today', s.hot_leads_today||0);
+    set('hl-avg',   avg>0 ? fmtDur(avg) : '—');
+  } catch(e){}
 }
 
-// ── CALLS ──────────────────────────────────────────────────────────────────
-async function loadCalls() {
+// ══════════════════════════════════════════════════════════════
+// PAGES
+// ══════════════════════════════════════════════════════════════
+const pageTitles = {dashboard:'Dashboard',calls:'All Calls',hot:'Hot Leads',dialer:'New Call',settings:'Settings'};
+
+function goPage(name, el) {
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  document.getElementById('p-'+name)?.classList.add('active');
+  if(el) el.classList.add('active');
+  set('pgTitle', pageTitles[name]||name);
+
+  if(name==='calls')    loadTableData('cl');
+  if(name==='hot')      loadHotPage();
+  if(name==='settings') loadSettings();
+}
+
+// ══════════════════════════════════════════════════════════════
+// TABLE RENDERER — diff-based, no DOM flicker
+// ══════════════════════════════════════════════════════════════
+async function loadTableData(scope) {
+  const s     = scope==='db' ? db : cl;
+  const tbId  = scope==='db' ? 'db-tbl' : 'calls-tbl';
+  const pgId  = scope==='db' ? 'db-pager' : 'calls-pager';
+  const prId  = scope==='db' ? 'db-pg-info' : 'calls-pg-info';
+  const pvId  = scope==='db' ? 'db-prev' : 'calls-prev';
+  const nxId  = scope==='db' ? 'db-next' : 'calls-next';
+
   try {
     const params = new URLSearchParams({
-      limit:    pageSize,
-      offset:   currentPage * pageSize,
-      status:   currentFilter,
-      hot_only: hotOnly,
-      search:   searchVal,
+      limit:s.size, offset:s.page*s.size,
+      status:s.filter, hot_only:s.hot, search:s.search
     });
-    const d = await api('/api/calls?' + params);
-    totalCalls = d.total || 0;
-    renderTable(d.calls || []);
-    renderHotLeads(d.calls || []);
-    renderPagination();
-  } catch(e) { console.error('loadCalls', e); }
-}
+    const d = await api('/api/calls?'+params);
+    s.total = d.total||0;
 
-function renderTable(calls) {
-  const body = document.getElementById('callTableBody');
-  if (!calls.length) {
-    body.innerHTML = `<div class="empty-table">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
-      <p>No calls found</p></div>`;
-    return;
-  }
-  body.innerHTML = calls.map(c => {
-    const bc = badgeClass(c.status);
-    const dur = c.duration_sec > 0 ? fmtDur(c.duration_sec) : '—';
-    const dt  = fmtDate(c.started_at);
-    const hotBadge = c.hot_lead ? `<span class="badge b-hot">🔥 Hot</span>` : `<span style="color:var(--text3);font-size:11px">—</span>`;
-    return `
-      <div class="call-row" onclick="openDetail('${esc(c.sid)}','${esc(c.phone)}',${JSON.stringify(c.hot_lead)},${JSON.stringify(c.duration_sec)},${JSON.stringify(c.started_at)},${JSON.stringify(c.recording_url||'')})">
-        <div class="cell-phone ${c.hot_lead?'hot':''}">${esc(c.phone||c.sid)}</div>
-        <div><span class="badge ${bc}">${c.status}</span></div>
-        <div class="cell-time">${dt}</div>
-        <div class="cell-dur">${dur}</div>
-        <div>${hotBadge}</div>
-        <div class="cell-act">
-          <button class="action-btn" onclick="event.stopPropagation();openDetail('${esc(c.sid)}','${esc(c.phone)}',${JSON.stringify(c.hot_lead)},${JSON.stringify(c.duration_sec)},${JSON.stringify(c.started_at)},${JSON.stringify(c.recording_url||'')})">View</button>
-        </div>
-      </div>`;
-  }).join('');
-}
+    const calls = d.calls||[];
+    const tb = document.getElementById(tbId);
 
-function renderHotLeads(calls) {
-  const hot = calls.filter(c => c.hot_lead).slice(0, 8);
-  const el  = document.getElementById('hotLeadsList');
-  if (!hot.length) {
-    el.innerHTML = `<div class="empty-table" style="padding:24px 20px"><p style="color:var(--text3);font-size:12px">No hot leads yet</p></div>`;
-    return;
-  }
-  el.innerHTML = hot.map(c => `
-    <div style="padding:12px 20px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s"
-         onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background=''"
-         onclick="openDetail('${esc(c.sid)}','${esc(c.phone)}',true,${JSON.stringify(c.duration_sec)},${JSON.stringify(c.started_at)},${JSON.stringify(c.recording_url||'')})">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <span style="font-family:'DM Mono',monospace;font-size:13px;color:var(--text)">${esc(c.phone)}</span>
-        <span style="font-size:10px;color:var(--text3);font-family:'DM Mono',monospace">${fmtDate(c.started_at)}</span>
-      </div>
-      <div style="font-size:11px;color:var(--text3);margin-top:3px">${fmtDur(c.duration_sec||0)} · ${c.status}</div>
-    </div>`).join('');
-}
-
-function renderPagination() {
-  const pg = document.getElementById('pagination');
-  const total = totalCalls;
-  if (total <= pageSize) { pg.style.display = 'none'; return; }
-  pg.style.display = 'flex';
-  const start = currentPage * pageSize + 1;
-  const end   = Math.min(start + pageSize - 1, total);
-  document.getElementById('paginationInfo').textContent = `${start}–${end} of ${total}`;
-  document.getElementById('prevBtn').disabled = currentPage === 0;
-  document.getElementById('nextBtn').disabled = end >= total;
-}
-
-// ── FILTERS ────────────────────────────────────────────────────────────────
-function setFilter(val, btn) {
-  currentFilter = val; currentPage = 0;
-  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  loadCalls();
-}
-function toggleHotOnly() {
-  hotOnly = !hotOnly; currentPage = 0;
-  document.getElementById('hotToggle').classList.toggle('active', hotOnly);
-  loadCalls();
-}
-function onSearch() {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(() => {
-    searchVal = document.getElementById('searchInput').value;
-    currentPage = 0;
-    loadCalls();
-  }, 300);
-}
-function prevPage() { if (currentPage > 0) { currentPage--; loadCalls(); } }
-function nextPage() { currentPage++; loadCalls(); }
-
-// ── PAGES ──────────────────────────────────────────────────────────────────
-function showPage(p) {
-  const titles = {dashboard:'Dashboard', calls:'All Calls', hot:'Hot Leads'};
-  document.getElementById('pageTitle').textContent = titles[p] || 'Dashboard';
-  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-  event?.currentTarget?.classList?.add('active');
-
-  if (p === 'hot') { hotOnly = true; document.getElementById('hotToggle').classList.add('active'); }
-  else { hotOnly = false; document.getElementById('hotToggle').classList.remove('active'); }
-  currentPage = 0; loadCalls();
-}
-
-// ── MAKE CALL ──────────────────────────────────────────────────────────────
-async function makeCall(phone) {
-  const input = document.getElementById('phoneInput');
-  const num   = (phone || input.value).trim();
-  if (!num) { toast('Enter a phone number', 'err'); return; }
-
-  const btn = document.getElementById('callBtn');
-  btn.disabled = true; btn.textContent = 'Calling...';
-
-  try {
-    const d = await api('/api/call', 'POST', {phone: num});
-    if (d.success) {
-      toast('✓ Calling ' + num, 'ok');
-      input.value = '';
-      await refreshAll();
+    if(!calls.length) {
+      tb.innerHTML=`<div class="tbl-empty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+        <p>No calls found</p></div>`;
     } else {
-      toast('✗ ' + (d.error || 'Call failed'), 'err');
+      // Diff update — only modify rows that changed
+      const existingRows = {};
+      tb.querySelectorAll('.trow[data-sid]').forEach(r => existingRows[r.dataset.sid]=r);
+      const newSids = new Set(calls.map(c=>c.sid));
+
+      // Remove stale rows
+      Object.keys(existingRows).forEach(sid => {
+        if(!newSids.has(sid)) existingRows[sid].remove();
+      });
+
+      // Insert or update rows in order
+      calls.forEach((c, idx) => {
+        const html = rowHtml(c);
+        let row = existingRows[c.sid];
+        if(!row) {
+          // New row — insert at correct position
+          const tmp = document.createElement('div');
+          tmp.innerHTML = html;
+          row = tmp.firstChild;
+          const rows = tb.querySelectorAll('.trow');
+          if(rows[idx]) tb.insertBefore(row, rows[idx]);
+          else tb.appendChild(row);
+        } else {
+          // Existing row — only update if content changed
+          const newHtml = html;
+          if(row.dataset.hash !== hashStr(newHtml)) {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = newHtml;
+            const newRow = tmp.firstChild;
+            tb.replaceChild(newRow, row);
+          }
+        }
+      });
     }
-  } catch(e) { toast('✗ Network error', 'err'); }
 
-  btn.disabled = false; btn.textContent = 'Call';
+    // Pagination
+    const pg = document.getElementById(pgId);
+    if(s.total <= s.size) { pg.style.display='none'; }
+    else {
+      pg.style.display='flex';
+      const start = s.page*s.size+1, end=Math.min(start+s.size-1,s.total);
+      document.getElementById(prId).textContent=`${start}–${end} of ${s.total}`;
+      document.getElementById(pvId).disabled = s.page===0;
+      document.getElementById(nxId).disabled = end>=s.total;
+    }
+
+    // Calls page count label
+    if(scope==='cl') set('calls-count-label', s.total+' calls');
+
+  } catch(e){ console.error('loadTable',scope,e); }
 }
 
-// ── BULK CALL ──────────────────────────────────────────────────────────────
-function focusDial() {
-  document.getElementById('phoneInput').focus();
+function rowHtml(c) {
+  const bc  = badgeClass(c.status);
+  const dur = c.duration_sec>0 ? fmtDur(c.duration_sec) : '—';
+  const dt  = fmtDate(c.started_at);
+  const hot = c.hot_lead;
+  const hasTx = c.transcript && c.transcript.trim().length > 0;
+
+  // Build data attrs for click handler
+  const d = JSON.stringify({
+    sid:c.sid, phone:c.phone||'', hot:hot,
+    dur:c.duration_sec||0, started:c.started_at||'', rec:c.recording_url||''
+  }).replace(/"/g,'&quot;');
+
+  return `<div class="trow ${hot?'hot-row':''}" data-sid="${esc(c.sid)}" data-hash="${hashStr(c.sid+c.status+c.duration_sec+c.hot_lead+c.recording_url)}" onclick="openModal(${d})">
+    <div class="cell-phone">${hot?'🔥 ':''}${esc(c.phone||c.sid)}</div>
+    <div><span class="badge ${bc}">${c.status}</span></div>
+    <div class="cell-time">${dt}</div>
+    <div class="cell-dur">${dur}</div>
+    <div>${hot?'<span class="badge b-hot">Hot</span>':'<span style="color:var(--t3);font-size:11px">—</span>'}</div>
+    <div style="font-size:11px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">${hasTx?'📝 Has transcript':'—'}</div>
+    <div class="cell-acts">
+      <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openModal(${d})">View</button>
+      ${c.recording_url?`<a class="btn btn-outline btn-sm" href="${esc(c.recording_url)}" target="_blank" onclick="event.stopPropagation()">▶</a>`:''}
+    </div>
+  </div>`;
 }
 
-function toggleBulk() {
-  const area = document.getElementById('bulkArea');
-  const tog  = document.getElementById('bulkToggle');
-  area.classList.toggle('open');
-  tog.style.color = area.classList.contains('open') ? 'var(--gold)' : '';
+// ── HOT LEADS WIDGET & PAGE ────────────────────────────────────────────────
+async function loadHotWidget() {
+  try {
+    const d = await api('/api/calls?limit=8&offset=0&status=all&hot_only=true&search=');
+    const hot = d.calls||[];
+    const el  = document.getElementById('hotWidget');
+    if(!hot.length) {
+      el.innerHTML='<div class="tbl-empty" style="padding:22px 18px"><p>No hot leads yet</p></div>';
+      return;
+    }
+    el.innerHTML = hot.map(c=>`
+      <div class="hot-item" onclick="openModal(${JSON.stringify({sid:c.sid,phone:c.phone||'',hot:true,dur:c.duration_sec||0,started:c.started_at||'',rec:c.recording_url||''}).replace(/"/g,'&quot;')})">
+        <div>
+          <div class="hot-phone">🔥 ${esc(c.phone||c.sid)}</div>
+          <div class="hot-meta">${fmtDate(c.started_at)} · ${fmtDur(c.duration_sec||0)}</div>
+        </div>
+        <span class="badge ${badgeClass(c.status)}">${c.status}</span>
+      </div>`).join('');
+  } catch(e){}
+}
+
+async function loadHotPage() {
+  try {
+    const d = await api('/api/calls?limit=100&offset=0&status=all&hot_only=true&search=');
+    const calls = d.calls||[];
+    const tb  = document.getElementById('hot-tbl');
+    if(!calls.length) {
+      tb.innerHTML='<div class="tbl-empty"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="36" height="36"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg><p>No hot leads yet</p></div>';
+      return;
+    }
+    tb.innerHTML = calls.map(c=>rowHtml(c)).join('');
+  } catch(e){}
+}
+
+// ── DB TABLE CONTROLS ────────────────────────────────────────────────────────
+function dbFilter(v,el) {
+  db.filter=v; db.page=0;
+  document.querySelectorAll('#db-filters .ftab').forEach(b=>b.classList.remove('on'));
+  el.classList.add('on');
+  loadTableData('db');
+}
+function dbToggleHot() {
+  db.hot=!db.hot; db.page=0;
+  document.getElementById('db-hot-tog').classList.toggle('on',db.hot);
+  loadTableData('db');
+}
+function dbSearch() {
+  clearTimeout(dbTimer);
+  dbTimer=setTimeout(()=>{ db.search=document.getElementById('db-search').value; db.page=0; loadTableData('db'); },320);
+}
+function dbPrev() { if(db.page>0){db.page--;loadTableData('db')} }
+function dbNext() { db.page++; loadTableData('db'); }
+
+// ── CALLS PAGE CONTROLS ──────────────────────────────────────────────────────
+function callsFilter(v,el) {
+  cl.filter=v; cl.page=0;
+  document.querySelectorAll('#p-calls .ftab').forEach(b=>b.classList.remove('on'));
+  el.classList.add('on');
+  loadTableData('cl');
+}
+function callsToggleHot() {
+  cl.hot=!cl.hot; cl.page=0;
+  document.getElementById('calls-hot-tog').classList.toggle('on',cl.hot);
+  loadTableData('cl');
+}
+function callsSearch() {
+  clearTimeout(clTimer);
+  clTimer=setTimeout(()=>{ cl.search=document.getElementById('calls-search').value; cl.page=0; loadTableData('cl'); },320);
+}
+function callsPrev() { if(cl.page>0){cl.page--;loadTableData('cl')} }
+function callsNext() { cl.page++; loadTableData('cl'); }
+
+// ══════════════════════════════════════════════════════════════
+// MAKE CALL
+// ══════════════════════════════════════════════════════════════
+async function makeCall(inputId, btnId) {
+  const inp  = document.getElementById(inputId);
+  const btn  = document.getElementById(btnId);
+  const num  = inp.value.trim();
+  if(!num) { toast('Enter a phone number','err'); return; }
+
+  btn.disabled=true; btn.textContent='Calling...';
+  try {
+    const d = await api('/api/call','POST',{phone:num});
+    if(d.success) {
+      toast('✓ Calling '+num,'ok');
+      inp.value='';
+      await loadTableData('db');
+    } else {
+      toast('✗ '+(d.error||'Call failed'),'err');
+    }
+  } catch(e){ toast('✗ Network error','err'); }
+  btn.disabled=false; btn.textContent=btnId.includes('q')?'Call':'Call Now';
 }
 
 async function bulkCall() {
   const raw  = document.getElementById('bulkInput').value;
   const nums = raw.split('\n').map(n=>n.trim()).filter(n=>n.length>6);
-  if (!nums.length) { toast('No valid numbers found', 'err'); return; }
+  if(!nums.length){ toast('No valid numbers','err'); return; }
 
-  const prog = document.getElementById('bulkProgress');
-  prog.style.display = 'block';
-
-  for (let i = 0; i < nums.length; i++) {
-    prog.textContent = `📞 Calling ${i+1} of ${nums.length}: ${nums[i]}`;
-    await makeCall(nums[i]);
-    if (i < nums.length - 1) await sleep(2500);
+  const prog = document.getElementById('bulkProg');
+  prog.style.display='block';
+  for(let i=0;i<nums.length;i++) {
+    prog.textContent=`📞 Calling ${i+1} of ${nums.length}: ${nums[i]}`;
+    const d = await api('/api/call','POST',{phone:nums[i]});
+    if(!d.success) toast('✗ '+nums[i]+': '+(d.error||'failed'),'err');
+    if(i<nums.length-1) await sleep(2500);
   }
-  prog.textContent = `✅ Done — ${nums.length} calls placed`;
-  toast(`✓ ${nums.length} calls placed`, 'ok');
+  prog.textContent=`✅ Done — ${nums.length} calls placed`;
+  toast(`✓ ${nums.length} calls placed`,'ok');
+  await loadTableData('db');
 }
 
-// ── DETAIL MODAL ───────────────────────────────────────────────────────────
-async function openDetail(sid, phone, isHot, durSec, startedAt, recUrl) {
-  document.getElementById('detailPhone').innerHTML =
-    esc(phone || sid) + (isHot ? ' <span class="badge b-hot" style="font-size:11px;vertical-align:middle">🔥 Hot Lead</span>' : '');
-  document.getElementById('detailMeta').innerHTML = `
-    <div class="meta-item">📅 ${fmtDate(startedAt)}</div>
-    <div class="meta-item">⏱ ${fmtDur(durSec||0)}</div>`;
-  document.getElementById('detailBody').innerHTML = '<div class="loading-msgs">Loading transcript...</div>';
+// ══════════════════════════════════════════════════════════════
+// MODAL
+// ══════════════════════════════════════════════════════════════
+function openModal(data) {
+  if(typeof data === 'string') data = JSON.parse(data);
+  const {sid, phone, hot, dur, started, rec} = data;
+
+  document.getElementById('m-phone').innerHTML =
+    esc(phone||sid) + (hot?' <span class="badge b-hot" style="font-size:11px;vertical-align:middle">🔥 Hot Lead</span>':'');
+  document.getElementById('m-meta').innerHTML = `
+    <div class="meta-it">📅 ${fmtDate(started)}</div>
+    <div class="meta-it">⏱ ${fmtDur(dur||0)}</div>`;
+  document.getElementById('m-body').innerHTML='<div class="loading-t">Loading transcript...</div>';
   document.getElementById('detailOverlay').classList.add('open');
 
+  loadMessages(sid, rec);
+}
+
+async function loadMessages(sid, rec) {
   try {
     const d = await api(`/api/calls/${sid}/messages`);
-    const msgs = d.messages || [];
-    let html = '<div class="transcript-header">Conversation Transcript</div>';
+    const msgs = d.messages||[];
+    let html = '<div class="sec-label">Conversation Transcript</div>';
 
-    if (!msgs.length) {
-      html += '<div class="no-msgs">No transcript available yet</div>';
+    if(!msgs.length) {
+      html += '<div class="no-msgs">No transcript recorded yet</div>';
     } else {
       msgs.forEach(m => {
-        const isAI = m.role === 'ai';
-        html += `
-          <div class="msg ${isAI?'ai':''}">
-            <div class="msg-avatar ${isAI?'ai':'cust'}">${isAI?'AI':'C'}</div>
-            <div class="msg-content">
-              <div class="msg-name">${isAI ? esc(agentName) + ' — AI' : 'Customer'}</div>
-              <div class="msg-bubble">${esc(m.content)}</div>
-            </div>
-          </div>`;
+        const isAI = m.role==='ai';
+        html += `<div class="msg ${isAI?'ai':''}">
+          <div class="av ${isAI?'a':'c'}">${isAI?'AI':'C'}</div>
+          <div>
+            <div class="msg-who">${isAI?esc(agentName)+' — AI':'Customer'}</div>
+            <div class="bubble">${esc(m.content)}</div>
+          </div>
+        </div>`;
       });
     }
 
-    if (recUrl) {
-      html += `<div class="recording-block">
-        <div class="transcript-header">Recording</div>
-        <a class="rec-link" href="${esc(recUrl)}" target="_blank">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+    if(rec) {
+      html += `<div class="rec-block">
+        <div class="sec-label">Recording</div>
+        <a class="rec-link" href="${esc(rec)}" target="_blank">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
           Play Recording
         </a>
       </div>`;
     }
 
-    document.getElementById('detailBody').innerHTML = html;
+    document.getElementById('m-body').innerHTML = html;
   } catch(e) {
-    document.getElementById('detailBody').innerHTML = '<div class="no-msgs">Failed to load transcript</div>';
+    document.getElementById('m-body').innerHTML='<div class="no-msgs">Failed to load</div>';
   }
 }
 
-function closeDetail(e) {
-  if (!e || e.target === document.getElementById('detailOverlay')) {
+function closeModal(e) {
+  if(!e || e.target===document.getElementById('detailOverlay'))
     document.getElementById('detailOverlay').classList.remove('open');
-  }
+}
+document.addEventListener('keydown', e=>{ if(e.key==='Escape') closeModal(); });
+
+// ══════════════════════════════════════════════════════════════
+// SETTINGS
+// ══════════════════════════════════════════════════════════════
+async function loadSettings() {
+  try {
+    const s = await api('/api/settings');
+    document.getElementById('s-agent-name').value   = s.agent_name  ||'';
+    document.getElementById('s-agency-name').value  = s.agency_name ||'';
+    document.getElementById('s-intro-text').value   = s.intro_text  ||'';
+    document.getElementById('s-system-prompt').value= s.system_prompt||'';
+  } catch(e){ toast('Failed to load settings','err'); }
 }
 
-document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') closeDetail();
-});
+async function saveIdentity() {
+  const body = {
+    agent_name:  document.getElementById('s-agent-name').value.trim(),
+    agency_name: document.getElementById('s-agency-name').value.trim(),
+    intro_text:  document.getElementById('s-intro-text').value.trim(),
+  };
+  try {
+    const d = await api('/api/settings','POST',body);
+    if(d.success) {
+      flashSaved('identity-saved');
+      await loadStatus();
+      toast('✓ Identity saved','ok');
+    }
+  } catch(e){ toast('✗ Save failed','err'); }
+}
 
-// ── UTILS ──────────────────────────────────────────────────────────────────
+async function savePrompt() {
+  const body = { system_prompt: document.getElementById('s-system-prompt').value.trim() };
+  try {
+    const d = await api('/api/settings','POST',body);
+    if(d.success) { flashSaved('prompt-saved'); toast('✓ Prompt saved','ok'); }
+  } catch(e){ toast('✗ Save failed','err'); }
+}
+
+async function resetPrompt() {
+  if(!confirm('Reset to default prompt?')) return;
+  try {
+    await api('/api/settings','POST',{system_prompt:'default'});
+    await loadSettings();
+    toast('✓ Reset to default','info');
+  } catch(e){ toast('✗ Failed','err'); }
+}
+
+function flashSaved(id) {
+  const el = document.getElementById(id);
+  el.classList.add('show');
+  setTimeout(()=>el.classList.remove('show'),3000);
+}
+
+// ══════════════════════════════════════════════════════════════
+// UTILS
+// ══════════════════════════════════════════════════════════════
 function badgeClass(s) {
-  return {ringing:'b-ring',answered:'b-ans',completed:'b-done','no-answer':'b-fail',busy:'b-fail',failed:'b-fail'}[s]||'b-done';
+  return {ringing:'b-ring',answered:'b-ans',completed:'b-done',
+          'no-answer':'b-fail',busy:'b-fail',failed:'b-fail'}[s]||'b-done';
 }
 function fmtDur(sec) {
-  if (!sec || sec <= 0) return '—';
-  const m = Math.floor(sec/60), s = sec%60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+  if(!sec||sec<=0) return '—';
+  const m=Math.floor(sec/60),s=sec%60;
+  return m>0?`${m}m ${s}s`:`${s}s`;
 }
 function fmtDate(iso) {
-  if (!iso) return '—';
+  if(!iso) return '—';
   try {
-    const d = new Date(iso);
-    return d.toLocaleDateString('en-AE',{day:'2-digit',month:'short'}) + ' ' +
+    const d=new Date(iso);
+    return d.toLocaleDateString('en-AE',{day:'2-digit',month:'short'})+' '+
            d.toLocaleTimeString('en-AE',{hour:'2-digit',minute:'2-digit',hour12:false});
-  } catch { return iso; }
+  } catch{ return iso; }
 }
-function setText(id, v) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = v;
+function set(id,v) { const e=document.getElementById(id); if(e) e.textContent=v; }
+function esc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
 }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+function hashStr(s){ let h=0; for(let i=0;i<s.length;i++){h=((h<<5)-h)+s.charCodeAt(i);h|=0;} return h; }
+
 async function api(url, method='GET', body=null) {
-  const opts = {method, headers:{'Content-Type':'application/json'}};
-  if (body) opts.body = JSON.stringify(body);
-  const r = await fetch(url, opts);
-  if (!r.ok) throw new Error(r.status);
+  const opts={method,headers:{'Content-Type':'application/json'}};
+  if(body) opts.body=JSON.stringify(body);
+  const r = await fetch(url,opts);
+  if(!r.ok) throw new Error(r.status);
   return r.json();
 }
-function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
-}
-function sleep(ms) { return new Promise(r=>setTimeout(r,ms)); }
 
 let _tt;
-function toast(msg, type='info') {
-  const el = document.getElementById('toast');
-  const icons = {ok:'✓', err:'✗', info:'ℹ'};
-  el.innerHTML = `<span>${icons[type]||'ℹ'}</span><span>${msg}</span>`;
-  el.className = 'show ' + (type==='err'?'err':type==='ok'?'ok':'info');
-  clearTimeout(_tt);
-  _tt = setTimeout(() => el.className='', 4000);
+function toast(msg,type='info') {
+  const el=document.getElementById('toast');
+  const ic={ok:'✓',err:'✗',info:'ℹ'};
+  el.innerHTML=`<span>${ic[type]||'ℹ'}</span><span>${msg}</span>`;
+  el.className='show '+(type==='err'?'err':type==='ok'?'ok':'info');
+  clearTimeout(_tt); _tt=setTimeout(()=>el.className='',4000);
 }
 
 init();
