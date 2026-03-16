@@ -11,57 +11,59 @@ _HEADERS = {
     "Content-Type":     "application/json",
 }
 
-# Indian accent — default voice for Hinglish calls
+# Indian accent — sonic-turbo (English/Hinglish only)
 DEFAULT_VOICE_ID = "95d51f79-c397-46f9-b49a-23763d3eaa2d"
+
+# Arabic voices require sonic-multilingual (sonic-turbo doesn't support Arabic)
+ARABIC_VOICE_IDS = {
+    "002622d8-19d0-4567-a16a-f99c7397c062",  # Huda
+    "fc923f89-1de5-4ddf-b93c-6da2ba63428a",  # Nour
+    "f1cdfb4a-bf7d-4e83-916e-8f0802278315",  # Walid
+    "664aec8a-64a4-4437-8a0b-a61aa4f51fe6",  # Hassan
+    "b0aa4612-81d2-4df3-9730-3fc064754b1f",  # Khalid
+}
+
+def _model_for_voice(voice_id: str) -> str:
+    """Arabic voices need sonic-multilingual. Indian/English uses sonic-turbo."""
+    if voice_id in ARABIC_VOICE_IDS:
+        return "sonic-multilingual"
+    return CARTESIA_MODEL   # sonic-turbo for everything else
 
 
 async def synthesize(
     text: str,
     voice_id: str = None,
-    encoding: str = "pcm_mulaw",   # "pcm_mulaw" for Twilio, "mp3" for browser preview
+    encoding: str = "pcm_mulaw",
     sample_rate: int = 8000,
 ) -> Optional[bytes]:
     if not text or not text.strip():
         return None
 
-    vid = voice_id or DEFAULT_VOICE_ID
+    vid   = voice_id or DEFAULT_VOICE_ID
+    model = _model_for_voice(vid)
 
-    # Cartesia output format spec:
-    # - Telephony (Twilio): container=wav, encoding=pcm_mulaw, sample_rate=8000
-    # - Browser preview:    container=mp3, encoding=mp3, sample_rate=44100
-    # NOTE: Cartesia mp3 format — container AND encoding must both be "mp3"
-    #       bit_rate is NOT a valid field — Cartesia ignores/rejects it
     if encoding == "mp3":
-        output_format = {
-            "container":   "mp3",
-            "encoding":    "mp3",
-            "sample_rate": 44100,
-        }
-        media_type = "audio/mpeg"
+        output_format = {"container": "mp3", "encoding": "mp3", "sample_rate": 44100}
     else:
-        output_format = {
-            "container":   "wav",
-            "encoding":    "pcm_mulaw",
-            "sample_rate": sample_rate,
-        }
-        media_type = "audio/wav"
+        output_format = {"container": "wav", "encoding": "pcm_mulaw", "sample_rate": sample_rate}
 
     payload = {
-        "model_id":      CARTESIA_MODEL,
+        "model_id":      model,
         "transcript":    text,
         "voice":         {"mode": "id", "id": vid},
         "output_format": output_format,
     }
 
+    log.info(f"TTS: model={model} voice={vid[:8]}... enc={encoding}")
+
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
                 "https://api.cartesia.ai/tts/bytes",
-                headers=_HEADERS,
-                json=payload,
+                headers=_HEADERS, json=payload,
             )
             if resp.status_code == 200:
-                log.info(f"TTS ok: {len(resp.content)} bytes voice={vid[:8]} enc={encoding}")
+                log.info(f"TTS ok: {len(resp.content)} bytes")
                 return resp.content
             log.error(f"Cartesia {resp.status_code}: {resp.text[:300]}")
     except Exception as e:
