@@ -6,7 +6,7 @@ LATENCY OPTIMIZATIONS:
 1. DB writes are fire-and-forget (asyncio.create_task) — never block the call path
 2. Groq + Cartesia TTS run in parallel after LLM returns
 3. TTS pre-generated and cached before /reply-audio is even fetched
-4. speechTimeout=2 (not 3) — saves 1s of dead air per turn
+4. speechTimeout=0.5 (not 3) — saves 1s of dead air per turn
 5. Render keep-alive via /health ping (add UptimeRobot to hit /health every 5min)
 """
 import asyncio

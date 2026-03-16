@@ -21,7 +21,7 @@ GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "100"))
 CARTESIA_API_KEY  = os.getenv("CARTESIA_API_KEY",  "sk_car_LBXevqbfri3vbRtFc7w1xA")
 CARTESIA_VOICE_ID = os.getenv("CARTESIA_VOICE_ID", "95d51f79-c397-46f9-b49a-23763d3eaa2d")
 CARTESIA_MODEL    = os.getenv("CARTESIA_MODEL",    "sonic-turbo")
-CARTESIA_VERSION  = "2024-06-10"
+CARTESIA_VERSION  = "2024-11-13"
 
 # ── SUPABASE ──────────────────────────────────────────────────
 SUPABASE_URL      = os.getenv("SUPABASE_URL",      "https://zwiiinbjdnjgmclfknrq.supabase.co")
