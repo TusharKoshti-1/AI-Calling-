@@ -776,7 +776,7 @@ let dbTimer=null, clTimer=null;
 async function init() {
   await loadStatus();
   await Promise.all([loadStats(), loadTableData('db'), loadHotWidget()]);
-  setInterval(tick, 4000);
+  setInterval(tick, 8000);   // poll every 8s, not 4s
   document.getElementById('qPhoneInput').addEventListener('keydown', e => {
     if(e.key==='Enter') makeCall('qPhoneInput','qCallBtn');
   });
@@ -786,10 +786,20 @@ async function init() {
 }
 
 async function tick() {
-  await Promise.all([loadStats(), loadTableData('db'), loadHotWidget()]);
-  const activePage = document.querySelector('.page.active')?.id;
-  if(activePage==='p-calls') await loadTableData('cl');
-  if(activePage==='p-hot')   await loadHotPage();
+  const activePage = document.querySelector('.page.active')?.id || 'p-dashboard';
+  // Always refresh stats (lightweight)
+  loadStats();
+  // Only fetch calls data for the visible page
+  if(activePage === 'p-dashboard') {
+    loadTableData('db');
+    loadHotWidget();
+  } else if(activePage === 'p-calls') {
+    loadTableData('cl');
+  } else if(activePage === 'p-hot') {
+    loadHotPage();
+    loadHotWidget();
+  }
+  // Settings, voice, dialer pages — no polling needed
 }
 
 async function loadStatus() {

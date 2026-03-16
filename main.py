@@ -461,13 +461,19 @@ async def voice_preview(request: Request):
         text = "Hello, this is Sara calling from Prestige Properties Dubai. You recently inquired about one of our properties."
 
     try:
+        log.info(f"Voice preview: voice_id={vid} text='{text[:60]}'")
         audio = await synthesize(text, voice_id=vid, encoding="mp3")
         if audio:
-            return Response(content=audio, media_type="audio/mpeg",
-                           headers={"Cache-Control": "no-store"})
-        return JSONResponse({"error": "TTS generation failed"}, status_code=500)
+            log.info(f"Voice preview ok: {len(audio)} bytes")
+            return Response(
+                content=audio,
+                media_type="audio/mpeg",
+                headers={"Cache-Control": "no-store", "Accept-Ranges": "bytes"}
+            )
+        log.error(f"Voice preview: synthesize returned None for voice_id={vid}")
+        return JSONResponse({"error": "TTS generation failed — check Cartesia API key and voice ID"}, status_code=500)
     except Exception as e:
-        log.error(f"Voice preview error: {e}")
+        log.error(f"Voice preview exception: {e}", exc_info=True)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
