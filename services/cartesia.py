@@ -1,20 +1,14 @@
 import logging
 import httpx
 from typing import Optional
-from config import CARTESIA_API_KEY, CARTESIA_MODEL, CARTESIA_VERSION
+from config import CARTESIA_API_KEY, CARTESIA_MODEL
 
 log = logging.getLogger(__name__)
 
-_HEADERS = {
-    "Cartesia-Version": CARTESIA_VERSION,
-    "X-API-Key":        CARTESIA_API_KEY,
-    "Content-Type":     "application/json",
-}
-
-# Indian accent — sonic-turbo (English/Hinglish only)
+# Indian accent — sonic-turbo (English/Hinglish, fastest ~40ms)
 DEFAULT_VOICE_ID = "95d51f79-c397-46f9-b49a-23763d3eaa2d"
 
-# Arabic voices require sonic-multilingual (sonic-turbo doesn't support Arabic)
+# Arabic voices — require sonic-3 (not sonic-turbo, not sonic-multilingual)
 ARABIC_VOICE_IDS = {
     "002622d8-19d0-4567-a16a-f99c7397c062",  # Huda
     "fc923f89-1de5-4ddf-b93c-6da2ba63428a",  # Nour
@@ -23,11 +17,10 @@ ARABIC_VOICE_IDS = {
     "b0aa4612-81d2-4df3-9730-3fc064754b1f",  # Khalid
 }
 
-def _model_for_voice(voice_id: str) -> str:
-    """Arabic voices need sonic-multilingual. Indian/English uses sonic-turbo."""
+def _model_for(voice_id: str) -> str:
     if voice_id in ARABIC_VOICE_IDS:
-        return "sonic-multilingual"
-    return CARTESIA_MODEL   # sonic-turbo for everything else
+        return "sonic-3"    # Arabic requires sonic-3
+    return CARTESIA_MODEL   # sonic-turbo for Indian/English
 
 
 async def synthesize(
@@ -40,7 +33,14 @@ async def synthesize(
         return None
 
     vid   = voice_id or DEFAULT_VOICE_ID
-    model = _model_for_voice(vid)
+    model = _model_for(vid)
+
+    # Use updated API version — 2024-06-10 is old and rejects some voice IDs
+    headers = {
+        "Cartesia-Version": "2024-11-13",
+        "X-API-Key":        CARTESIA_API_KEY,
+        "Content-Type":     "application/json",
+    }
 
     if encoding == "mp3":
         output_format = {"container": "mp3", "encoding": "mp3", "sample_rate": 44100}
@@ -54,18 +54,19 @@ async def synthesize(
         "output_format": output_format,
     }
 
-    log.info(f"TTS: model={model} voice={vid[:8]}... enc={encoding}")
+    log.info(f"TTS → model={model} voice={vid[:8]}... enc={encoding}")
 
     try:
         async with httpx.AsyncClient(timeout=20) as client:
             resp = await client.post(
                 "https://api.cartesia.ai/tts/bytes",
-                headers=_HEADERS, json=payload,
+                headers=headers,
+                json=payload,
             )
             if resp.status_code == 200:
                 log.info(f"TTS ok: {len(resp.content)} bytes")
                 return resp.content
-            log.error(f"Cartesia {resp.status_code}: {resp.text[:300]}")
+            log.error(f"Cartesia {resp.status_code}: {resp.text}")
     except Exception as e:
         log.error(f"Cartesia error: {e}")
     return None
