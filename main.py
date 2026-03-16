@@ -310,7 +310,7 @@ async def twiml_greeting():
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n'
         f'  <Gather input="speech" action="{BASE_URL}/process-speech"'
-        f' method="POST" speechTimeout="1" language="en-US">\n'
+        f' method="POST" speechTimeout="0.5" language="en-US">\n'
         f'    <Play>{BASE_URL}/intro-audio</Play>\n'
         f'  </Gather>\n'
         f'  <Redirect>{BASE_URL}/twiml-greeting</Redirect>\n</Response>'
@@ -413,7 +413,7 @@ async def process_speech(
         twiml = (
             '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n'
             f'  <Gather input="speech" action="{BASE_URL}/process-speech"'
-            f' method="POST" speechTimeout="2" language="en-US">\n'
+            f' method="POST" speechTimeout="0.5" language="en-US">\n'
             f'    <Play>{audio_url}</Play>\n'
             f'  </Gather>\n'
             f'  <Redirect>{BASE_URL}/twiml-greeting</Redirect>\n</Response>'
