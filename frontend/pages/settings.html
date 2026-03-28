@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Settings — CallSara</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/assets/css/main.css"/>
+</head>
+<body>
+<div class="app-layout">
+  <nav class="sidebar">
+    <div class="brand"><div class="brand-logo"><span class="brand-icon">◈</span><span class="brand-name">CallSara</span></div><div class="brand-agency" id="sidebarAgency"></div></div>
+    <nav class="nav-links">
+      <div class="nav-section-label">OVERVIEW</div>
+      <a class="nav-link" href="/">                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Dashboard</a>
+      <a class="nav-link" href="/calls">           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>All Calls</a>
+      <a class="nav-link" href="/hot-leads">       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Hot Leads</a>
+      <div class="nav-section-label">ACTIONS</div>
+      <a class="nav-link" href="/dialer">          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>New Call</a>
+      <div class="nav-section-label">CONFIG</div>
+      <a class="nav-link active" href="/settings"> <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>Settings</a>
+    </nav>
+    <div class="sidebar-status"><div class="status-row"><span class="status-dot" id="sidebarDot"></span><span class="status-text" id="sidebarStatus">Checking...</span></div><div class="status-version" id="sidebarVersion"></div></div>
+  </nav>
+
+  <div class="page-wrap">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-btn" onclick="toggleSidebar()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+        <h1 class="page-title">Settings</h1>
+      </div>
+      <div class="topbar-right"><div class="topbar-agency" id="topbarAgency"></div></div>
+    </header>
+
+    <main class="page-content">
+      <div style="max-width:860px">
+
+        <!-- AGENT IDENTITY -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+              Agent Identity
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Agent Name</label>
+                <div class="form-hint">The name Sara uses to introduce herself on calls</div>
+                <input class="form-input" id="agentName" placeholder="Sara"/>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Agency / Company Name</label>
+                <div class="form-hint">Your real estate company or brand name</div>
+                <input class="form-input" id="agencyName" placeholder="Prestige Properties Dubai"/>
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Intro Message</label>
+              <div class="form-hint">What the AI says when the call is first answered. Leave blank to auto-generate: <em>"Hello, this is [Agent] calling from [Agency]..."</em></div>
+              <input class="form-input" id="introText" placeholder="Leave blank for auto-generated intro"/>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-gold" onclick="saveIdentity()">Save Identity</button>
+              <span class="save-indicator" id="identitySaved">✓ Saved — next call will use new identity</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- SYSTEM PROMPT -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+              AI System Prompt
+            </div>
+            <button class="btn btn-ghost btn-sm" onclick="resetPrompt()">↺ Reset to default</button>
+          </div>
+          <div class="card-body">
+            <div class="form-group">
+              <label class="form-label">System Prompt</label>
+              <div class="form-hint">
+                Controls how Sara behaves on every call — language, tone, qualification flow, hot lead detection.
+                Use <code style="background:var(--s2);padding:1px 5px;border-radius:4px;font-size:11px">{agent_name}</code> and
+                <code style="background:var(--s2);padding:1px 5px;border-radius:4px;font-size:11px">{agency_name}</code> as placeholders.
+              </div>
+              <textarea class="form-textarea" id="systemPrompt" rows="26"></textarea>
+            </div>
+            <div class="form-actions">
+              <button class="btn btn-gold" onclick="savePrompt()">Save Prompt</button>
+              <span class="save-indicator" id="promptSaved">✓ Saved — active on next call</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CONNECTION STATUS -->
+        <div class="card" style="margin-bottom:0">
+          <div class="card-header">
+            <div class="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              Connection Status
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="statusGrid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px"></div>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/utils.js"></script>
+<script>
+async function init() {
+  await loadSidebarStatus();
+  await Promise.all([loadSettings(), loadConnectionStatus()]);
+}
+
+async function loadSettings() {
+  try {
+    const d = await SettingsAPI.get();
+    const r = d.resolved || {};
+    document.getElementById('agentName').value   = r.agent_name    || '';
+    document.getElementById('agencyName').value  = r.agency_name   || '';
+    document.getElementById('introText').value   = r.intro_text !== undefined
+      ? (d.settings?.find(s=>s.key==='agent.intro_text')?.value || '') : '';
+    document.getElementById('systemPrompt').value = r.system_prompt || '';
+  } catch(e) { toast('Failed to load settings: ' + e.message, 'err'); }
+}
+
+async function saveIdentity() {
+  const updates = {
+    'agent.name':        document.getElementById('agentName').value.trim(),
+    'agent.agency_name': document.getElementById('agencyName').value.trim(),
+    'agent.intro_text':  document.getElementById('introText').value.trim(),
+  };
+  try {
+    const d = await SettingsAPI.save(updates);
+    if (d.success) { flashSaved('identitySaved'); toast('✓ Identity saved', 'ok'); await loadSidebarStatus(); }
+  } catch(e) { toast('✗ Save failed: ' + e.message, 'err'); }
+}
+
+async function savePrompt() {
+  const updates = { 'agent.system_prompt': document.getElementById('systemPrompt').value.trim() };
+  try {
+    const d = await SettingsAPI.save(updates);
+    if (d.success) { flashSaved('promptSaved'); toast('✓ Prompt saved', 'ok'); }
+  } catch(e) { toast('✗ Save failed: ' + e.message, 'err'); }
+}
+
+async function resetPrompt() {
+  if (!confirm('Reset system prompt to default?')) return;
+  try {
+    await SettingsAPI.resetPrompt();
+    await loadSettings();
+    toast('✓ Reset to default', 'info');
+  } catch(e) { toast('✗ Reset failed', 'err'); }
+}
+
+async function loadConnectionStatus() {
+  try {
+    const s = await StatusAPI.get();
+    const items = [
+      { label: 'Telephony (Twilio)', ok: s.twilio_configured, detail: s.from_number || 'Token missing' },
+      { label: 'Database',           ok: s.db_connected,       detail: s.db_connected ? 'Connected' : 'Disconnected' },
+      { label: 'Provider',           ok: true,                  detail: s.provider || 'twilio' },
+    ];
+    document.getElementById('statusGrid').innerHTML = items.map(it => `
+      <div style="background:var(--s2);border:1px solid var(--b2);border-radius:8px;padding:14px">
+        <div style="font-size:11px;color:var(--t3);margin-bottom:6px">${it.label}</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="width:7px;height:7px;border-radius:50%;background:${it.ok?'var(--green)':'var(--red)'};flex-shrink:0"></span>
+          <span style="font-size:13px;font-family:'DM Mono',monospace;color:var(--t)">${it.detail}</span>
+        </div>
+      </div>`).join('');
+  } catch(e) {}
+}
+
+function flashSaved(id) {
+  const el = document.getElementById(id);
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 4000);
+}
+
+init();
+</script>
+</body>
+</html>

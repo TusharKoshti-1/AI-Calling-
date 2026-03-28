@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Hot Leads — CallSara</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/assets/css/main.css"/>
+</head>
+<body>
+<div class="app-layout">
+  <nav class="sidebar">
+    <div class="brand"><div class="brand-logo"><span class="brand-icon">◈</span><span class="brand-name">CallSara</span></div><div class="brand-agency" id="sidebarAgency"></div></div>
+    <nav class="nav-links">
+      <div class="nav-section-label">OVERVIEW</div>
+      <a class="nav-link" href="/">                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Dashboard</a>
+      <a class="nav-link" href="/calls">           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>All Calls</a>
+      <a class="nav-link active" href="/hot-leads"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>Hot Leads</a>
+      <div class="nav-section-label">ACTIONS</div>
+      <a class="nav-link" href="/dialer">          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>New Call</a>
+      <div class="nav-section-label">CONFIG</div>
+      <a class="nav-link" href="/settings">        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>Settings</a>
+    </nav>
+    <div class="sidebar-status"><div class="status-row"><span class="status-dot" id="sidebarDot"></span><span class="status-text" id="sidebarStatus">Checking...</span></div><div class="status-version" id="sidebarVersion"></div></div>
+  </nav>
+
+  <div class="page-wrap">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-btn" onclick="toggleSidebar()"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+        <h1 class="page-title">🔥 Hot Leads</h1>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-agency" id="topbarAgency"></div>
+        <a href="/dialer" class="btn btn-gold btn-sm">New Call</a>
+      </div>
+    </header>
+
+    <main class="page-content">
+      <div class="stats-row" style="grid-template-columns:repeat(3,1fr)">
+        <div class="stat-card amber">
+          <div class="stat-icon">🔥</div>
+          <div class="stat-value" id="hlTotal">0</div>
+          <div class="stat-label">Total Hot Leads</div>
+        </div>
+        <div class="stat-card gold">
+          <div class="stat-icon">📅</div>
+          <div class="stat-value" id="hlToday">0</div>
+          <div class="stat-label">Today</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-icon">⏱</div>
+          <div class="stat-value" id="hlAvg">—</div>
+          <div class="stat-label">Avg Call Duration</div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:0">
+        <div class="card-header">
+          <div class="card-title">🔥 All Hot Leads</div>
+          <div style="font-size:12px;color:var(--t3)" id="hlCount">—</div>
+        </div>
+        <div class="data-table">
+          <div class="table-header" style="grid-template-columns:150px 95px 120px 75px 1fr 100px">
+            <span>Phone</span><span>Status</span><span>Date & Time</span>
+            <span>Duration</span><span>Transcript</span><span>Actions</span>
+          </div>
+          <div id="hotTable"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<div class="modal-overlay" id="callModal" onclick="closeModalOverlay('callModal',event)">
+  <div class="modal">
+    <div class="modal-header"><div><div class="modal-title" id="modalPhone">—</div><div class="modal-meta" id="modalMeta"></div></div><button class="modal-close" onclick="closeModalOverlay('callModal')">×</button></div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+<div id="toast"></div>
+
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/utils.js"></script>
+<script src="/assets/js/table.js"></script>
+<script>
+// Hot leads uses a simpler row (no lead badge column since all are hot)
+function hotRow(c) {
+  const dur  = fmtDuration(c.duration_sec);
+  const dt   = fmtDate(c.started_at);
+  const hash = String(hashStr(c.sid+c.status+c.duration_sec+(c.recording_url||'')));
+  const data = JSON.stringify({sid:c.sid,phone:c.phone||'',hot:true,dur:c.duration_sec||0,started:c.started_at||'',rec:c.recording_url||''}).replace(/"/g,'&quot;');
+  return `
+    <div class="table-row hot" data-sid="${esc(c.sid)}" data-hash="${hash}" onclick="openCallDetail(${data})">
+      <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:500">🔥 ${esc(c.phone||c.sid)}</div>
+      <div>${badgeHtml(c.status)}</div>
+      <div style="font-size:11px;color:var(--t3);font-family:'DM Mono',monospace">${dt}</div>
+      <div style="font-family:'DM Mono',monospace;font-size:12px;color:var(--t2)">${dur}</div>
+      <div style="font-size:11px;color:var(--t3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.transcript?'📝 Available':'—'}</div>
+      <div style="display:flex;gap:5px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openCallDetail(${data})">View</button>
+        ${c.recording_url?`<a class="btn btn-outline btn-sm" href="${esc(c.recording_url)}" target="_blank" onclick="event.stopPropagation()">▶</a>`:''}
+      </div>
+    </div>`;
+}
+
+const ht = new CallTable('hotTable', hotRow);
+
+async function init() {
+  await loadSidebarStatus();
+  const s = await StatusAPI.get().catch(()=>({}));
+  window._agentName = s.agent_name || 'Sara';
+  await Promise.all([loadStats(), loadHot()]);
+  setInterval(()=>Promise.all([loadStats(),loadHot()]), 8000);
+}
+
+async function loadStats() {
+  try {
+    const s = await CallsAPI.stats();
+    setText('hlTotal', s.hot_leads||0);
+    setText('hlToday', s.hot_leads_today||0);
+    setText('hlAvg',   s.avg_duration_sec>0 ? fmtDuration(s.avg_duration_sec) : '—');
+  } catch(e) {}
+}
+
+async function loadHot() {
+  try {
+    const d = await CallsAPI.list({ limit:100, offset:0, status:'all', hot_only:true, search:'' });
+    setText('hlCount', (d.total||0) + ' leads');
+    ht.render(d.calls||[]);
+  } catch(e) {}
+}
+
+init();
+</script>
+</body>
+</html>

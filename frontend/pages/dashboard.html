@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Dashboard — CallSara</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/assets/css/main.css"/>
+</head>
+<body>
+<div class="app-layout">
+
+  <!-- SIDEBAR -->
+  <nav class="sidebar">
+    <div class="brand">
+      <div class="brand-logo"><span class="brand-icon">◈</span><span class="brand-name">CallSara</span></div>
+      <div class="brand-agency" id="sidebarAgency">Loading...</div>
+    </div>
+    <nav class="nav-links">
+      <div class="nav-section-label">OVERVIEW</div>
+      <a class="nav-link active" href="/" data-page="dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        Dashboard
+      </a>
+      <a class="nav-link" href="/calls" data-page="calls">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+        All Calls
+      </a>
+      <a class="nav-link" href="/hot-leads" data-page="hot-leads">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        Hot Leads
+      </a>
+      <div class="nav-section-label">ACTIONS</div>
+      <a class="nav-link" href="/dialer" data-page="dialer">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+        New Call
+      </a>
+      <div class="nav-section-label">CONFIG</div>
+      <a class="nav-link" href="/settings" data-page="settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>
+        Settings
+      </a>
+    </nav>
+    <div class="sidebar-status">
+      <div class="status-row">
+        <span class="status-dot" id="sidebarDot"></span>
+        <span class="status-text" id="sidebarStatus">Checking...</span>
+      </div>
+      <div class="status-version" id="sidebarVersion"></div>
+    </div>
+  </nav>
+
+  <!-- MAIN -->
+  <div class="page-wrap">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="menu-btn" onclick="toggleSidebar()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+        </button>
+        <h1 class="page-title">Dashboard</h1>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-agency" id="topbarAgency"></div>
+        <a href="/dialer" class="btn btn-gold btn-sm">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+          New Call
+        </a>
+      </div>
+    </header>
+
+    <main class="page-content">
+      <!-- STATS -->
+      <div class="stats-row">
+        <div class="stat-card gold">
+          <div class="stat-icon">📞</div>
+          <div class="stat-value" id="stTotal">0</div>
+          <div class="stat-label">Total Calls</div>
+          <div class="stat-sub" id="stToday">0 today</div>
+        </div>
+        <div class="stat-card green">
+          <div class="stat-icon">✅</div>
+          <div class="stat-value" id="stAnswered">0</div>
+          <div class="stat-label">Answered</div>
+          <div class="stat-sub" id="stAvg">avg —</div>
+        </div>
+        <div class="stat-card amber">
+          <div class="stat-icon">🔥</div>
+          <div class="stat-value" id="stHot">0</div>
+          <div class="stat-label">Hot Leads</div>
+          <div class="stat-sub" id="stHotToday">0 today</div>
+        </div>
+        <div class="stat-card red">
+          <div class="stat-icon">📵</div>
+          <div class="stat-value" id="stFailed">0</div>
+          <div class="stat-label">No Answer</div>
+          <div class="stat-sub" id="stRinging">0 ringing</div>
+        </div>
+      </div>
+
+      <!-- 2-COL -->
+      <div style="display:grid;grid-template-columns:340px 1fr;gap:16px;align-items:start">
+
+        <!-- LEFT -->
+        <div>
+          <!-- QUICK DIAL -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+                Quick Dial
+              </div>
+            </div>
+            <div class="card-body">
+              <label class="form-label">Phone Number (with country code)</label>
+              <div class="phone-input-row">
+                <input id="quickPhone" class="phone-input" type="tel" placeholder="+971 50 123 4567" autocomplete="off"/>
+                <button class="btn btn-gold" id="quickCallBtn" onclick="quickCall()">Call</button>
+              </div>
+              <div style="margin-top:8px;font-size:11px;color:var(--t3)">
+                From <span id="fromNumber" style="color:var(--t2);font-family:'DM Mono',monospace">—</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- HOT LEADS WIDGET -->
+          <div class="card">
+            <div class="card-header">
+              <div class="card-title">🔥 Recent Hot Leads</div>
+              <a href="/hot-leads" class="btn btn-ghost btn-sm">View all</a>
+            </div>
+            <div id="hotWidget" style="min-height:60px"></div>
+          </div>
+        </div>
+
+        <!-- RIGHT: RECENT CALLS -->
+        <div class="card" style="margin-bottom:0">
+          <div class="card-header">
+            <div class="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+              Recent Calls
+            </div>
+          </div>
+          <div class="filter-bar">
+            <input class="search-input" id="dbSearch" placeholder="Search number..." oninput="onDbSearch()"/>
+            <button class="filter-tab active" onclick="dbFilter('all',this)">All</button>
+            <button class="filter-tab" onclick="dbFilter('completed',this)">Completed</button>
+            <button class="filter-tab" onclick="dbFilter('no-answer',this)">No Answer</button>
+            <div class="flex-spacer"></div>
+            <div class="hot-filter" id="dbHotBtn" onclick="dbToggleHot()">🔥 Hot only</div>
+          </div>
+          <div class="data-table">
+            <div class="table-header" style="grid-template-columns:140px 90px 110px 70px 70px 1fr 100px">
+              <span>Phone</span><span>Status</span><span>Date & Time</span>
+              <span>Duration</span><span>Lead</span><span>Transcript</span><span>Actions</span>
+            </div>
+            <div id="dbTable"></div>
+          </div>
+          <div class="pagination" id="dbPager" style="display:none">
+            <span id="dbPagerInfo"></span>
+            <div class="pagination-btns">
+              <button class="page-btn" id="dbPrev" onclick="dbPage(-1)">← Prev</button>
+              <button class="page-btn" id="dbNext" onclick="dbPage(1)">Next →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+
+<!-- CALL DETAIL MODAL -->
+<div class="modal-overlay" id="callModal" onclick="closeModalOverlay('callModal',event)">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="modalPhone">—</div>
+        <div class="modal-meta" id="modalMeta"></div>
+      </div>
+      <button class="modal-close" onclick="closeModalOverlay('callModal')">×</button>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/assets/js/api.js"></script>
+<script src="/assets/js/utils.js"></script>
+<script src="/assets/js/table.js"></script>
+<script>
+// ── State ─────────────────────────────────────────────────────
+const db = { filter:'all', hot:false, search:'', page:0, size:20, total:0 };
+const dbTable = new CallTable('dbTable', buildCallRow);
+let _pollTimer = null;
+
+// ── Init ─────────────────────────────────────────────────────
+async function init() {
+  await loadSidebarStatus();
+  const s = await StatusAPI.get().catch(()=>({}));
+  setText('fromNumber', s.from_number || '—');
+  window._agentName = s.agent_name || 'Sara';
+
+  await Promise.all([loadStats(), loadTable(), loadHotWidget()]);
+  _pollTimer = setInterval(tick, 5000);
+
+  document.getElementById('quickPhone').addEventListener('keydown', e => {
+    if (e.key === 'Enter') quickCall();
+  });
+}
+
+async function tick() {
+  await Promise.all([loadStats(), loadTable(), loadHotWidget()]);
+}
+
+// ── Stats ─────────────────────────────────────────────────────
+async function loadStats() {
+  try {
+    const s = await CallsAPI.stats();
+    setText('stTotal',    s.total_calls || 0);
+    setText('stAnswered', s.answered    || 0);
+    setText('stHot',      s.hot_leads   || 0);
+    setText('stFailed',   s.no_answer   || 0);
+    setText('stToday',    (s.calls_today||0) + ' today');
+    setText('stHotToday', (s.hot_leads_today||0) + ' today');
+    setText('stRinging',  (s.ringing||0) + ' ringing');
+    setText('stAvg',      s.avg_duration_sec > 0 ? 'avg ' + fmtDuration(s.avg_duration_sec) : 'avg —');
+  } catch(e) {}
+}
+
+// ── Table ─────────────────────────────────────────────────────
+async function loadTable() {
+  try {
+    const d = await CallsAPI.list({ limit:db.size, offset:db.page*db.size, status:db.filter, hot_only:db.hot, search:db.search });
+    db.total = d.total || 0;
+    dbTable.render(d.calls || []);
+
+    const pg = document.getElementById('dbPager');
+    if (db.total <= db.size) { pg.style.display='none'; return; }
+    pg.style.display = 'flex';
+    const start = db.page*db.size+1, end = Math.min(start+db.size-1, db.total);
+    setText('dbPagerInfo', `${start}–${end} of ${db.total}`);
+    document.getElementById('dbPrev').disabled = db.page===0;
+    document.getElementById('dbNext').disabled = end>=db.total;
+  } catch(e) {}
+}
+
+function dbFilter(v, el) {
+  db.filter=v; db.page=0;
+  document.querySelectorAll('.filter-bar .filter-tab').forEach(b=>b.classList.remove('active'));
+  el.classList.add('active');
+  loadTable();
+}
+function dbToggleHot() {
+  db.hot=!db.hot; db.page=0;
+  document.getElementById('dbHotBtn').classList.toggle('active', db.hot);
+  loadTable();
+}
+let _dbSearchTimer;
+function onDbSearch() {
+  clearTimeout(_dbSearchTimer);
+  _dbSearchTimer = setTimeout(()=>{ db.search=document.getElementById('dbSearch').value; db.page=0; loadTable(); }, 320);
+}
+function dbPage(dir) { db.page+=dir; loadTable(); }
+
+// ── Hot widget ────────────────────────────────────────────────
+async function loadHotWidget() {
+  try {
+    const d = await CallsAPI.list({ limit:6, offset:0, status:'all', hot_only:true, search:'' });
+    const hot = d.calls || [];
+    const el  = document.getElementById('hotWidget');
+    if (!hot.length) {
+      el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--t3);font-size:12px">No hot leads yet</div>';
+      return;
+    }
+    el.innerHTML = hot.map(c => `
+      <div style="padding:11px 20px;border-bottom:1px solid var(--b);cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .12s"
+           onmouseover="this.style.background='var(--s2)'" onmouseout="this.style.background=''"
+           onclick="openCallDetail(${JSON.stringify({sid:c.sid,phone:c.phone||'',hot:true,dur:c.duration_sec||0,started:c.started_at||'',rec:c.recording_url||''}).replace(/"/g,'&quot;')})">
+        <div>
+          <div style="font-family:'DM Mono',monospace;font-size:13px;font-weight:500">🔥 ${esc(c.phone||c.sid)}</div>
+          <div style="font-size:11px;color:var(--t3);margin-top:2px">${fmtDate(c.started_at)} · ${fmtDuration(c.duration_sec||0)}</div>
+        </div>
+        ${badgeHtml(c.status)}
+      </div>`).join('');
+  } catch(e) {}
+}
+
+// ── Quick dial ────────────────────────────────────────────────
+async function quickCall() {
+  const phone = document.getElementById('quickPhone').value.trim();
+  if (!phone) { toast('Enter a phone number', 'err'); return; }
+  const btn = document.getElementById('quickCallBtn');
+  btn.disabled = true; btn.textContent = 'Calling...';
+  try {
+    const d = await CallsAPI.initiate(phone);
+    if (d.success) {
+      toast('✓ Calling ' + phone, 'ok');
+      document.getElementById('quickPhone').value = '';
+      await loadTable();
+    } else {
+      toast('✗ ' + (d.error || 'Call failed'), 'err');
+    }
+  } catch(e) { toast('✗ ' + e.message, 'err'); }
+  btn.disabled = false; btn.textContent = 'Call';
+}
+
+init();
+</script>
+</body>
+</html>

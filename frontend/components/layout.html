@@ -1,0 +1,69 @@
+<!--
+frontend/components/layout.html
+Shared HTML shell used by all pages via JS include.
+NOT served directly — each page inlines this structure.
+-->
+
+<!-- SIDEBAR -->
+<nav class="sidebar" id="sidebar">
+  <div class="brand">
+    <div class="brand-logo">
+      <span class="brand-icon">◈</span>
+      <span class="brand-name">CallSara</span>
+    </div>
+    <div class="brand-agency" id="sidebarAgency">Loading...</div>
+  </div>
+
+  <nav class="nav-links">
+    <div class="nav-section-label">OVERVIEW</div>
+    <a class="nav-link" href="/" data-page="dashboard">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Dashboard
+    </a>
+    <a class="nav-link" href="/calls" data-page="calls">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+      All Calls
+    </a>
+    <a class="nav-link" href="/hot-leads" data-page="hot-leads">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      Hot Leads
+    </a>
+
+    <div class="nav-section-label">ACTIONS</div>
+    <a class="nav-link" href="/dialer" data-page="dialer">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      New Call
+    </a>
+
+    <div class="nav-section-label">CONFIG</div>
+    <a class="nav-link" href="/settings" data-page="settings">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>
+      Settings
+    </a>
+  </nav>
+
+  <div class="sidebar-status">
+    <div class="status-row">
+      <span class="status-dot" id="sidebarDot"></span>
+      <span class="status-text" id="sidebarStatus">Checking...</span>
+    </div>
+    <div class="status-version" id="sidebarVersion"></div>
+  </div>
+</nav>
+
+<!-- TOPBAR -->
+<header class="topbar">
+  <div class="topbar-left">
+    <button class="menu-btn" onclick="toggleSidebar()" aria-label="Menu">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+    <h1 class="page-title" id="pageTitle">Dashboard</h1>
+  </div>
+  <div class="topbar-right">
+    <div class="topbar-agency" id="topbarAgency"></div>
+    <a href="/dialer" class="btn btn-gold btn-sm">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+      New Call
+    </a>
+  </div>
+</header>
