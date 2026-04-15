@@ -677,6 +677,66 @@ body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-s
             </div>
           </div>
 
+          <!-- LLM Provider -->
+          <div class="card">
+            <div class="card-hd"><div class="card-title">🧠 LLM Provider</div></div>
+            <div class="dial-body">
+
+              <!-- Provider toggle -->
+              <div class="field-group" style="margin-bottom:18px">
+                <label class="f-label">Active LLM</label>
+                <div class="f-sub">Choose which AI model powers the call responses.</div>
+                <div style="display:flex;gap:10px;margin-top:8px">
+                  <button id="llm-btn-groq"   class="btn btn-gold"  onclick="selectLLM('groq')"  style="min-width:110px">⚡ Groq</button>
+                  <button id="llm-btn-openai" class="btn btn-ghost" onclick="selectLLM('openai')" style="min-width:110px">🤖 OpenAI</button>
+                </div>
+                <div id="llm-active-label" style="margin-top:8px;font-size:12px;color:var(--gold);font-family:'DM Mono',monospace"></div>
+              </div>
+
+              <!-- Groq settings (shown when groq is active) -->
+              <div id="llm-groq-section">
+                <div class="settings-grid">
+                  <div class="field-group settings-full">
+                    <label class="f-label">Groq Model</label>
+                    <div class="f-sub">e.g. llama-3.3-70b-versatile, mixtral-8x7b-32768, gemma2-9b-it</div>
+                    <input class="f-input" id="s-groq-model" placeholder="llama-3.3-70b-versatile"/>
+                  </div>
+                </div>
+                <div class="save-bar">
+                  <button class="btn btn-gold" onclick="saveLLMSettings()">Save Groq Settings</button>
+                  <span class="save-msg" id="llm-saved">✓ Saved</span>
+                </div>
+              </div>
+
+              <!-- OpenAI settings (shown when openai is active) -->
+              <div id="llm-openai-section" style="display:none">
+                <div class="settings-grid">
+                  <div class="field-group settings-full">
+                    <label class="f-label">OpenAI API Key</label>
+                    <div class="f-sub">Your OpenAI secret key (sk-…). Stored securely in the database.</div>
+                    <input class="f-input" id="s-openai-key" type="password" placeholder="sk-proj-..."/>
+                  </div>
+                  <div class="field-group settings-full">
+                    <label class="f-label">OpenAI Model</label>
+                    <div class="f-sub">e.g. gpt-4o-mini (fast &amp; cheap), gpt-4o (best quality), gpt-3.5-turbo (economy)</div>
+                    <input class="f-input" id="s-openai-model" placeholder="gpt-4o-mini"/>
+                  </div>
+                </div>
+                <div style="background:var(--gold3);border:1px solid var(--gold2);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--t2)">
+                  💡 <strong style="color:var(--gold)">Recommended models:</strong>
+                  <span style="margin-left:4px"><code>gpt-4o-mini</code> — best price/performance for call bots &nbsp;|&nbsp;
+                  <code>gpt-4o</code> — highest quality &nbsp;|&nbsp;
+                  <code>gpt-3.5-turbo</code> — lowest cost</span>
+                </div>
+                <div class="save-bar">
+                  <button class="btn btn-gold" onclick="saveLLMSettings()">Save OpenAI Settings</button>
+                  <span class="save-msg" id="llm-saved">✓ Saved</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
           <!-- System Prompt -->
           <div class="card">
             <div class="card-hd">
@@ -1154,7 +1214,55 @@ async function loadSettings() {
     document.getElementById('s-agency-name').value  = s.agency_name ||'';
     document.getElementById('s-intro-text').value   = s.intro_text  ||'';
     document.getElementById('s-system-prompt').value= s.system_prompt||'';
+
+    // LLM settings
+    const provider = (s.llm_provider || 'groq').toLowerCase();
+    _setLLMButtons(provider);
+    document.getElementById('s-groq-model').value   = s.groq_model   || 'llama-3.3-70b-versatile';
+    document.getElementById('s-openai-model').value = s.openai_model || 'gpt-4o-mini';
+    // Never pre-fill the API key for security — only show placeholder
+    document.getElementById('s-openai-key').value   = '';
+    document.getElementById('s-openai-key').placeholder =
+      s.openai_api_key ? '(key saved — enter new key to change)' : 'sk-proj-...';
   } catch(e){ toast('Failed to load settings','err'); }
+}
+
+function _setLLMButtons(provider) {
+  const isOpenAI = provider === 'openai';
+  document.getElementById('llm-btn-groq').className   = isOpenAI ? 'btn btn-ghost' : 'btn btn-gold';
+  document.getElementById('llm-btn-openai').className = isOpenAI ? 'btn btn-gold'  : 'btn btn-ghost';
+  document.getElementById('llm-groq-section').style.display   = isOpenAI ? 'none' : '';
+  document.getElementById('llm-openai-section').style.display = isOpenAI ? ''     : 'none';
+  document.getElementById('llm-active-label').textContent =
+    isOpenAI ? '🟢 Active: OpenAI' : '🟢 Active: Groq';
+}
+
+function selectLLM(provider) {
+  _setLLMButtons(provider);
+}
+
+async function saveLLMSettings() {
+  const groqSection   = document.getElementById('llm-groq-section');
+  const isOpenAI      = groqSection.style.display === 'none';
+  const provider      = isOpenAI ? 'openai' : 'groq';
+
+  const body = { llm_provider: provider };
+
+  if (isOpenAI) {
+    const key = document.getElementById('s-openai-key').value.trim();
+    if (key) body.openai_api_key = key;
+    body.openai_model = document.getElementById('s-openai-model').value.trim() || 'gpt-4o-mini';
+  } else {
+    body.groq_model = document.getElementById('s-groq-model').value.trim() || 'llama-3.3-70b-versatile';
+  }
+
+  try {
+    const d = await api('/api/settings','POST', body);
+    if(d.success) {
+      flashSaved('llm-saved');
+      toast(`✓ Switched to ${provider === 'openai' ? 'OpenAI' : 'Groq'}`, 'ok');
+    }
+  } catch(e){ toast('✗ Save failed','err'); }
 }
 
 async function saveIdentity() {

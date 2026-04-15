@@ -26,6 +26,7 @@ from config import (
     BASE_URL, PORT,
     TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM,
     AGENT_NAME, AGENCY_NAME, END_PHRASES,
+    LLM_PROVIDER,
 )
 from db.database import (
     init_db, close_db,
@@ -34,7 +35,7 @@ from db.database import (
     get_stats, get_total_count,
     get_setting, set_setting, get_all_settings,
 )
-from services.groq     import get_reply
+from services.llm      import get_reply
 from services.cartesia import synthesize, DEFAULT_VOICE_ID
 from services.clean    import clean_reply
 from services.storage  import ensure_bucket, upload_recording
@@ -51,6 +52,10 @@ _settings: dict = {
     "intro_text":    "",
     "system_prompt": "default",
     "voice_id":      DEFAULT_VOICE_ID,
+    "llm_provider":  LLM_PROVIDER,   # "groq" | "openai"
+    "openai_api_key": "",            # stored in DB, not hardcoded
+    "openai_model":  "gpt-4o-mini",
+    "groq_model":    "llama-3.3-70b-versatile",
 }
 
 def _get_voice_id() -> str:
@@ -70,6 +75,23 @@ def _get_system_prompt() -> str:
     if sp and sp != "default": return sp
     from config import SYSTEM_PROMPT
     return SYSTEM_PROMPT
+
+def _apply_runtime_llm_settings():
+    """Push runtime model/key overrides from _settings into the config module."""
+    import config as cfg
+    provider = _settings.get("llm_provider", "groq").lower()
+
+    if provider == "openai":
+        key = _settings.get("openai_api_key", "").strip()
+        if key:
+            cfg.OPENAI_API_KEY = key
+        model = _settings.get("openai_model", "").strip()
+        if model:
+            cfg.OPENAI_MODEL = model
+    else:
+        model = _settings.get("groq_model", "").strip()
+        if model:
+            cfg.GROQ_MODEL = model
 
 
 # ── Fire-and-forget DB write — NEVER blocks the call path ─────────────────────
@@ -261,7 +283,8 @@ async def api_get_settings():
 @app.post("/api/settings")
 async def api_save_settings(request: Request):
     body = await request.json()
-    allowed = {"agent_name","agency_name","intro_text","system_prompt","voice_id"}
+    allowed = {"agent_name","agency_name","intro_text","system_prompt","voice_id",
+               "llm_provider","openai_api_key","openai_model","groq_model"}
     saved = {}
     for key, val in body.items():
         if key in allowed and isinstance(val, str):
@@ -365,19 +388,23 @@ async def process_speech(
     if speech:
         _bg(_safe(insert_message(call_sid, "customer", speech)))
 
-    # ── GROQ LLM ─────────────────────────────────────────────────────────────
+    # ── LLM ──────────────────────────────────────────────────────────────────
     state   = _call_state[call_sid]
     history = state["history"]
     history.append({"role": "user", "content": customer_text})
+
+    # Apply runtime model/key overrides from settings before calling LLM
+    _apply_runtime_llm_settings()
 
     try:
         raw_reply = await get_reply(
             customer_text,
             history=history[:-1],
-            system_prompt=_get_system_prompt()
+            system_prompt=_get_system_prompt(),
+            provider=_settings.get("llm_provider", "groq"),
         )
     except Exception as e:
-        log.error(f"Groq error [{call_sid}]: {e}")
+        log.error(f"LLM error [{call_sid}]: {e}")
         raw_reply = "Thank you for calling, our team will follow up shortly. Have a great day! [END_CALL]"
 
     reply_text, end_call, is_hot_lead = clean_reply(raw_reply)

@@ -17,6 +17,17 @@ GROQ_MODEL      = os.getenv("GROQ_MODEL",      "llama-3.3-70b-versatile")
 GROQ_TEMP       = float(os.getenv("GROQ_TEMP", "0.3"))
 GROQ_MAX_TOKENS = int(os.getenv("GROQ_MAX_TOKENS", "100"))
 
+# ── OPENAI ────────────────────────────────────────────────────
+OPENAI_API_KEY    = os.getenv("OPENAI_API_KEY",    "")           # ← SET IN RENDER ENV VARS
+OPENAI_MODEL      = os.getenv("OPENAI_MODEL",      "gpt-4o-mini")
+OPENAI_TEMP       = float(os.getenv("OPENAI_TEMP", "0.3"))
+OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", "100"))
+
+# ── LLM PROVIDER ──────────────────────────────────────────────
+# Which LLM to use by default: "groq" or "openai"
+# This is overridden at runtime via the Settings UI / DB.
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "groq")
+
 # ── CARTESIA ──────────────────────────────────────────────────
 CARTESIA_API_KEY  = os.getenv("CARTESIA_API_KEY",  "sk_car_LBXevqbfri3vbRtFc7w1xA")
 CARTESIA_VOICE_ID = os.getenv("CARTESIA_VOICE_ID", "95d51f79-c397-46f9-b49a-23763d3eaa2d")

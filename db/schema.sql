@@ -52,11 +52,16 @@ CREATE TABLE IF NOT EXISTS settings (
 
 -- Insert defaults (won't overwrite existing)
 INSERT INTO settings (key, value) VALUES
-    ('agent_name',   'Sara'),
-    ('agency_name',  'Prestige Properties Dubai'),
-    ('intro_text',   'Hello, this is Sara calling from Prestige Properties Dubai. You recently inquired about one of our properties — I just wanted to follow up quickly. Do you have two minutes?'),
+    ('agent_name',    'Sara'),
+    ('agency_name',   'Prestige Properties Dubai'),
+    ('intro_text',    'Hello, this is Sara calling from Prestige Properties Dubai. You recently inquired about one of our properties — I just wanted to follow up quickly. Do you have two minutes?'),
     ('system_prompt', 'default'),
-    ('voice_id',      '95d51f79-c397-46f9-b49a-23763d3eaa2d')
+    ('voice_id',      '95d51f79-c397-46f9-b49a-23763d3eaa2d'),
+    -- LLM provider settings (new)
+    ('llm_provider',  'groq'),
+    ('groq_model',    'llama-3.3-70b-versatile'),
+    ('openai_model',  'gpt-4o-mini'),
+    ('openai_api_key','')
 ON CONFLICT (key) DO NOTHING;
 
 -- ── AUTO-UPDATE updated_at ────────────────────────────────────
