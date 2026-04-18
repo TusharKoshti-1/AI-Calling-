@@ -53,13 +53,6 @@ SUPABASE_BUCKET   = os.getenv("SUPABASE_BUCKET",   "recordings")
 AGENT_NAME  = os.getenv("AGENT_NAME",  "Sara")
 AGENCY_NAME = os.getenv("AGENCY_NAME", "Prestige Properties Dubai")
 
-INTRO_TEXT = os.getenv(
-    "INTRO_TEXT",
-    f"Hello, this is {AGENT_NAME} calling from {AGENCY_NAME}. "
-    f"You recently inquired about one of our properties — I just wanted to follow up quickly. "
-    f"Do you have two minutes?"
-)
-
 # ── SYSTEM PROMPT ─────────────────────────────────────────────
 SYSTEM_PROMPT = f"""You are {AGENT_NAME}, a professional real estate consultant calling from {AGENCY_NAME} in Dubai.
 

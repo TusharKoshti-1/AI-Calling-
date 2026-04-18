@@ -663,12 +663,6 @@ body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-s
                   <div class="f-sub">Your real estate company name</div>
                   <input class="f-input" id="s-agency-name" placeholder="Prestige Properties Dubai"/>
                 </div>
-                <div class="field-group settings-full">
-                  <label class="f-label">Intro Message</label>
-                  <div class="f-sub">First thing Sara says when call is answered. Leave blank to auto-generate from agent/agency name.</div>
-                  <input class="f-input" id="s-intro-text"
-                    placeholder="Hello, this is Sara calling from Prestige Properties Dubai..."/>
-                </div>
               </div>
               <div class="save-bar">
                 <button class="btn btn-gold" onclick="saveIdentity()">Save Identity</button>
@@ -781,7 +775,7 @@ body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-s
             <div style="padding:14px 18px">
               <label class="fl">Text to speak in preview</label>
               <input class="ph-input" id="preview-text" style="width:100%"
-                value="Hello, this is Sara calling from Prestige Properties Dubai. You recently inquired about one of our properties. Do you have two minutes?"/>
+                value="Hello, I'm Sara from Prestige Properties Dubai. Are you looking to invest in a property, or is this somewhere you'd like to live?"/>
             </div>
           </div>
 
@@ -1212,7 +1206,6 @@ async function loadSettings() {
     const s = await api('/api/settings');
     document.getElementById('s-agent-name').value   = s.agent_name  ||'';
     document.getElementById('s-agency-name').value  = s.agency_name ||'';
-    document.getElementById('s-intro-text').value   = s.intro_text  ||'';
     document.getElementById('s-system-prompt').value= s.system_prompt||'';
 
     // LLM settings
@@ -1269,7 +1262,6 @@ async function saveIdentity() {
   const body = {
     agent_name:  document.getElementById('s-agent-name').value.trim(),
     agency_name: document.getElementById('s-agency-name').value.trim(),
-    intro_text:  document.getElementById('s-intro-text').value.trim(),
   };
   try {
     const d = await api('/api/settings','POST',body);
@@ -1427,7 +1419,7 @@ async function previewVoice(voice,btnId){
   btn.className="prev-btn pb-load";
   btn.innerHTML='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Loading...';
   curBtnId=btnId;
-  const text=document.getElementById("preview-text")?.value?.trim()||"Hello, this is Sara from Prestige Properties Dubai.";
+  const text=document.getElementById("preview-text")?.value?.trim()||"Hello, I'm Sara from Prestige Properties Dubai. Are you looking to invest in a property, or is this somewhere you'd like to live?";
   const sid=voice.id.replace(/-/g,"").slice(0,8);
   try{
     const resp=await fetch("/api/voice/preview",{

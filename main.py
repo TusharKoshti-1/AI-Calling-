@@ -49,7 +49,6 @@ log = logging.getLogger(__name__)
 _settings: dict = {
     "agent_name":    AGENT_NAME,
     "agency_name":   AGENCY_NAME,
-    "intro_text":    "",
     "system_prompt": "default",
     "voice_id":      DEFAULT_VOICE_ID,
     "llm_provider":  LLM_PROVIDER,   # "groq" | "openai"
@@ -61,14 +60,6 @@ _settings: dict = {
 def _get_voice_id() -> str:
     v = _settings.get("voice_id", "").strip()
     return v if v else DEFAULT_VOICE_ID
-
-def _get_intro() -> str:
-    t = _settings.get("intro_text", "").strip()
-    if t: return t
-    n, a = _settings["agent_name"], _settings["agency_name"]
-    return (f"Hello, this is {n} calling from {a}. "
-            f"You recently inquired about one of our properties — "
-            f"do you have two minutes?")
 
 def _get_system_prompt() -> str:
     sp = _settings.get("system_prompt", "").strip()
@@ -118,8 +109,6 @@ async def lifespan(app: FastAPI):
         _settings.update(db_s)
         log.info(f"Settings: agent={_settings['agent_name']} voice={_settings['voice_id'][:8]}")
         await ensure_bucket()
-        # Pre-warm intro audio cache on startup
-        asyncio.create_task(_warm_intro())
     except Exception as e:
         log.error(f"Startup warning: {e}")
     yield
@@ -127,24 +116,12 @@ async def lifespan(app: FastAPI):
     except Exception: pass
 
 
-async def _warm_intro():
-    """Pre-generate intro audio at startup so first call is instant."""
-    global _intro_cache
-    try:
-        text = _get_intro()
-        audio = await synthesize(text, voice_id=_get_voice_id())
-        if audio:
-            _intro_cache = audio
-            log.info(f"Intro audio pre-warmed: {len(audio)} bytes")
-    except Exception as e:
-        log.error(f"Intro warm-up failed: {e}")
-
-
 app = FastAPI(title="CallSara — AI Calling", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 _call_state: dict = {}
-_intro_cache: Optional[bytes] = None
+# Cache for AI-generated opening audio per call SID
+_opening_audio_cache: dict = {}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -283,7 +260,7 @@ async def api_get_settings():
 @app.post("/api/settings")
 async def api_save_settings(request: Request):
     body = await request.json()
-    allowed = {"agent_name","agency_name","intro_text","system_prompt","voice_id",
+    allowed = {"agent_name","agency_name","system_prompt","voice_id",
                "llm_provider","openai_api_key","openai_model","groq_model"}
     saved = {}
     for key, val in body.items():
@@ -291,10 +268,6 @@ async def api_save_settings(request: Request):
             _settings[key] = val.strip()
             saved[key] = val.strip()
             _bg(_safe(set_setting(key, val.strip())))
-    global _intro_cache
-    _intro_cache = None
-    # Re-warm intro audio with new settings
-    asyncio.create_task(_warm_intro())
     return {"success": True, "saved": saved}
 
 
@@ -310,7 +283,9 @@ async def voice_preview(request: Request):
     if not vid:
         return JSONResponse({"error": "voice_id required"}, status_code=400)
     if not text:
-        text = _get_intro()
+        n = _settings.get("agent_name", AGENT_NAME)
+        a = _settings.get("agency_name", AGENCY_NAME)
+        text = f"Hello, I'm {n} from {a}. Are you looking to invest in a property, or is this somewhere you'd like to live?"
     try:
         log.info(f"Voice preview: voice={vid[:8]} text='{text[:60]}'")
         audio = await synthesize(text, voice_id=vid, encoding="mp3")
@@ -329,28 +304,96 @@ async def voice_preview(request: Request):
 # ══════════════════════════════════════════════════════════════════════════════
 
 @app.post("/twiml-greeting")
-async def twiml_greeting():
+async def twiml_greeting(
+    CallSid: Optional[str] = Form(None),
+    To:      Optional[str] = Form(None),
+    From:    Optional[str] = Form(None),
+):
+    """
+    Called by Twilio when the call is answered.
+    Instead of a static intro, we ask the AI to generate its opening line
+    based on the system prompt, then play it and start listening.
+    """
+    call_sid = CallSid or ""
+    to_num   = To or ""
+
+    # Init call state if not already done (first touch from Twilio)
+    if call_sid not in _call_state:
+        _call_state[call_sid] = {
+            "history": [], "phone": to_num,
+            "started_at": datetime.now(timezone.utc).isoformat(),
+        }
+        _bg(_safe(upsert_call(call_sid, {
+            "phone": to_num, "from_number": From or "", "status": "answered",
+            "agent_name": _settings["agent_name"], "agency_name": _settings["agency_name"],
+        })))
+
+    # If we already have opening audio cached for this call, go straight to listening
+    if call_sid in _opening_audio_cache:
+        twiml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n'
+            f'  <Gather input="speech" action="{BASE_URL}/process-speech"'
+            f' method="POST" speechTimeout="0.5" language="en-US">\n'
+            f'    <Play>{BASE_URL}/opening-audio?sid={call_sid}</Play>\n'
+            f'  </Gather>\n'
+            f'  <Redirect method="POST">{BASE_URL}/process-speech</Redirect>\n</Response>'
+        )
+        return Response(content=twiml, media_type="text/xml")
+
+    # Ask AI to generate opening line, start TTS in background
+    _apply_runtime_llm_settings()
+    try:
+        # We pass a special trigger so the AI knows to give its opening line
+        opening_raw = await get_reply(
+            "__CALL_START__",
+            history=[],
+            system_prompt=_get_system_prompt() + "\n\nIMPORTANT: This is the very start of the call. The customer just answered. Give your natural opening greeting and first qualifying question. Do NOT use [END_CALL] or [HOT_LEAD] tags here.",
+            provider=_settings.get("llm_provider", "groq"),
+        )
+    except Exception as e:
+        log.error(f"AI opening line error [{call_sid}]: {e}")
+        n = _settings.get("agent_name", AGENT_NAME)
+        a = _settings.get("agency_name", AGENCY_NAME)
+        opening_raw = f"Hello, this is {n} calling from {a}. You recently inquired about one of our properties — are you looking to invest, or is this somewhere you'd like to live?"
+
+    opening_text, _, _ = clean_reply(opening_raw)
+    log.info(f"[{call_sid}] AI opening: '{opening_text[:80]}'")
+
+    # Store in history as first AI message
+    state = _call_state[call_sid]
+    state["history"].append({"role": "assistant", "content": opening_text})
+    _bg(_safe(insert_message(call_sid, "ai", opening_text)))
+
+    # Start TTS immediately and cache it
+    audio = await synthesize(opening_text, voice_id=_get_voice_id())
+    if audio:
+        _opening_audio_cache[call_sid] = audio
+
     twiml = (
         '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n'
         f'  <Gather input="speech" action="{BASE_URL}/process-speech"'
         f' method="POST" speechTimeout="0.5" language="en-US">\n'
-        f'    <Play>{BASE_URL}/intro-audio</Play>\n'
+        f'    <Play>{BASE_URL}/opening-audio?sid={call_sid}</Play>\n'
         f'  </Gather>\n'
-        f'  <Redirect>{BASE_URL}/twiml-greeting</Redirect>\n</Response>'
+        f'  <Redirect method="POST">{BASE_URL}/process-speech</Redirect>\n</Response>'
     )
     return Response(content=twiml, media_type="text/xml")
 
 
+@app.get("/opening-audio")
+async def opening_audio(sid: str = ""):
+    """Serve the AI-generated opening line audio."""
+    audio = _opening_audio_cache.get(sid)
+    if audio:
+        return Response(content=audio, media_type="audio/wav",
+                        headers={"Cache-Control": "public, max-age=300"})
+    return Response(status_code=204)
+
+
 @app.get("/intro-audio")
 async def intro_audio():
-    global _intro_cache
-    if not _intro_cache:
-        log.info("Generating intro audio (not pre-warmed)...")
-        _intro_cache = await synthesize(_get_intro(), voice_id=_get_voice_id())
-    if _intro_cache:
-        return Response(content=_intro_cache, media_type="audio/wav",
-                        headers={"Cache-Control":"public, max-age=3600"})
-    return Response(status_code=500)
+    """Legacy endpoint — redirects callers; kept for backward compatibility."""
+    return Response(status_code=204)
 
 
 @app.post("/process-speech")
@@ -382,11 +425,22 @@ async def process_speech(
     else:
         _bg(_safe(update_call(call_sid, status="answered")))
 
-    customer_text = speech if speech else "hello"
+    # If no speech detected, re-prompt with silence handler
+    if not speech:
+        twiml = (
+            '<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n'
+            f'  <Gather input="speech" action="{BASE_URL}/process-speech"'
+            f' method="POST" speechTimeout="0.5" language="en-US" timeout="5">\n'
+            f'    <Pause length="1"/>\n'
+            f'  </Gather>\n'
+            f'  <Redirect method="POST">{BASE_URL}/process-speech</Redirect>\n</Response>'
+        )
+        return Response(content=twiml, media_type="text/xml")
+
+    customer_text = speech
 
     # Fire-and-forget DB message save — doesn't slow us down
-    if speech:
-        _bg(_safe(insert_message(call_sid, "customer", speech)))
+    _bg(_safe(insert_message(call_sid, "customer", speech)))
 
     # ── LLM ──────────────────────────────────────────────────────────────────
     state   = _call_state[call_sid]
@@ -538,6 +592,7 @@ async def call_status(
     if status in ("completed","failed","no-answer","busy","canceled"):
         _bg(_safe(finalize_call(call_sid, status, duration, "", "", transcript)))
         _call_state.pop(call_sid, None)
+        _opening_audio_cache.pop(call_sid, None)  # Free memory
     elif status == "in-progress":
         _bg(_safe(update_call(call_sid, status="answered")))
 
