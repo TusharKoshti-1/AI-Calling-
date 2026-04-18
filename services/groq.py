@@ -31,7 +31,7 @@ async def get_reply(customer_text: str, history: list = None,
                 text = resp.json()["choices"][0]["message"]["content"]
                 log.info(f"Groq: {text[:100]}")
                 return text
-            log.error(f"Groq {resp.status_code}: {resp.text[:200]}")
+            log.error(f"Groq {resp.status_code}: {resp.text[:500]}")
     except Exception as e:
         log.error(f"Groq error: {e}")
-    return "Thank you, have a great day!"
+    return "Sorry, I missed that — could you say that again?"

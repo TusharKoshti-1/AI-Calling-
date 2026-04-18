@@ -340,26 +340,31 @@ async def twiml_greeting(
         )
         return Response(content=twiml, media_type="text/xml")
 
-    # Ask AI to generate opening line, start TTS in background
+    # Ask AI to generate opening line.
+    # We inject a system-level instruction to produce the opening line.
+    # No fake user message is stored in history — history stays clean.
     _apply_runtime_llm_settings()
     try:
-        # We pass a special trigger so the AI knows to give its opening line
         opening_raw = await get_reply(
-            "__CALL_START__",
+            "begin",   # minimal neutral trigger word — not stored in history
             history=[],
-            system_prompt=_get_system_prompt() + "\n\nIMPORTANT: This is the very start of the call. The customer just answered. Give your natural opening greeting and first qualifying question. Do NOT use [END_CALL] or [HOT_LEAD] tags here.",
+            system_prompt=(
+                _get_system_prompt()
+                + "\n\n---\n[SYSTEM]: The call just connected. Deliver your opening line now. "
+                "Do not include [END_CALL] or [HOT_LEAD]. One or two sentences only."
+            ),
             provider=_settings.get("llm_provider", "groq"),
         )
     except Exception as e:
         log.error(f"AI opening line error [{call_sid}]: {e}")
         n = _settings.get("agent_name", AGENT_NAME)
         a = _settings.get("agency_name", AGENCY_NAME)
-        opening_raw = f"Hello, this is {n} calling from {a}. You recently inquired about one of our properties — are you looking to invest, or is this somewhere you'd like to live?"
+        opening_raw = f"Hi, this is Sara calling from {a} regarding your car service — is this a good time?"
 
     opening_text, _, _ = clean_reply(opening_raw)
     log.info(f"[{call_sid}] AI opening: '{opening_text[:80]}'")
 
-    # Store in history as first AI message
+    # Store ONLY as assistant message — no user message polluting history
     state = _call_state[call_sid]
     state["history"].append({"role": "assistant", "content": opening_text})
     _bg(_safe(insert_message(call_sid, "ai", opening_text)))
@@ -459,7 +464,7 @@ async def process_speech(
         )
     except Exception as e:
         log.error(f"LLM error [{call_sid}]: {e}")
-        raw_reply = "Thank you for calling, our team will follow up shortly. Have a great day! [END_CALL]"
+        raw_reply = "Sorry, I missed that — could you say that again?"
 
     reply_text, end_call, is_hot_lead = clean_reply(raw_reply)
     t_llm = (datetime.now(timezone.utc) - t0).total_seconds()

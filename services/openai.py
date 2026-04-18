@@ -20,6 +20,9 @@ async def get_reply(customer_text: str, history: list = None,
         "temperature": OPENAI_TEMP, "max_tokens": OPENAI_MAX_TOKENS,
     }
     try:
+        if not OPENAI_API_KEY or not OPENAI_API_KEY.startswith("sk-"):
+            log.error(f"OpenAI API key is missing or invalid (starts with: '{OPENAI_API_KEY[:8] if OPENAI_API_KEY else 'EMPTY'}'). Set it in Settings → LLM Provider.")
+            return "Sorry, I missed that — could you say that again?"
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 "https://api.openai.com/v1/chat/completions",
@@ -31,7 +34,9 @@ async def get_reply(customer_text: str, history: list = None,
                 text = resp.json()["choices"][0]["message"]["content"]
                 log.info(f"OpenAI: {text[:100]}")
                 return text
-            log.error(f"OpenAI {resp.status_code}: {resp.text[:200]}")
+            # Log the full error so we can diagnose API/model issues
+            log.error(f"OpenAI API error {resp.status_code}: {resp.text[:500]}")
     except Exception as e:
-        log.error(f"OpenAI error: {e}")
-    return "Thank you, have a great day!"
+        log.error(f"OpenAI request failed: {e}")
+    # Neutral fallback — does NOT contain any end-call phrases
+    return "Sorry, I missed that — could you say that again?"
