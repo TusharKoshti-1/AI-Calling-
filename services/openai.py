@@ -17,7 +17,7 @@ async def get_reply(customer_text: str, history: list = None,
 
     payload = {
         "model": OPENAI_MODEL, "messages": messages,
-        "temperature": OPENAI_TEMP, "max_tokens": OPENAI_MAX_TOKENS,
+        "temperature": OPENAI_TEMP, "max_completion_tokens": OPENAI_MAX_TOKENS,
     }
     try:
         if not OPENAI_API_KEY or not OPENAI_API_KEY.startswith("sk-"):
