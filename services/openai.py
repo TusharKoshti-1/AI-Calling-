@@ -1,14 +1,22 @@
 import logging
 import httpx
-from config import OPENAI_API_KEY, OPENAI_MODEL, OPENAI_TEMP, OPENAI_MAX_TOKENS
+import config as cfg
 
 log = logging.getLogger(__name__)
 
 async def get_reply(customer_text: str, history: list = None,
                     system_prompt: str = None) -> str:
     if system_prompt is None:
-        from config import SYSTEM_PROMPT
-        system_prompt = SYSTEM_PROMPT
+        system_prompt = cfg.SYSTEM_PROMPT
+
+    # Read all values at call time (not import time) so that runtime overrides
+    # from _apply_runtime_llm_settings() in main.py are always picked up.
+    api_key = cfg.OPENAI_API_KEY
+    model   = cfg.OPENAI_MODEL
+    temp    = cfg.OPENAI_TEMP
+    max_tok = cfg.OPENAI_MAX_TOKENS
+
+    log.info(f"OpenAI → model={model}")
 
     messages = [{"role": "system", "content": system_prompt}]
     if history:
@@ -16,27 +24,31 @@ async def get_reply(customer_text: str, history: list = None,
     messages.append({"role": "user", "content": customer_text})
 
     payload = {
-        "model": OPENAI_MODEL, "messages": messages,
-        "temperature": OPENAI_TEMP, "max_completion_tokens": OPENAI_MAX_TOKENS,
+        "model": model, "messages": messages,
+        "temperature": temp, "max_completion_tokens": max_tok,
     }
     try:
-        if not OPENAI_API_KEY or not OPENAI_API_KEY.startswith("sk-"):
-            log.error(f"OpenAI API key is missing or invalid (starts with: '{OPENAI_API_KEY[:8] if OPENAI_API_KEY else 'EMPTY'}'). Set it in Settings → LLM Provider.")
+        if not api_key or not api_key.startswith("sk-"):
+            log.error(
+                f"OpenAI API key missing/invalid "
+                f"('{api_key[:8] if api_key else 'EMPTY'}'). "
+                f"Set it in Settings → LLM Provider."
+            )
             return "Sorry, I missed that — could you say that again?"
+
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 "https://api.openai.com/v1/chat/completions",
-                headers={"Authorization": f"Bearer {OPENAI_API_KEY}",
+                headers={"Authorization": f"Bearer {api_key}",
                          "Content-Type": "application/json"},
                 json=payload,
             )
             if resp.status_code == 200:
                 text = resp.json()["choices"][0]["message"]["content"]
-                log.info(f"OpenAI: {text[:100]}")
+                log.info(f"OpenAI reply: {text[:100]}")
                 return text
-            # Log the full error so we can diagnose API/model issues
             log.error(f"OpenAI API error {resp.status_code}: {resp.text[:500]}")
     except Exception as e:
         log.error(f"OpenAI request failed: {e}")
-    # Neutral fallback — does NOT contain any end-call phrases
+
     return "Sorry,?"
