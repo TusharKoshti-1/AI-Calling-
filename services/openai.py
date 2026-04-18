@@ -39,4 +39,4 @@ async def get_reply(customer_text: str, history: list = None,
     except Exception as e:
         log.error(f"OpenAI request failed: {e}")
     # Neutral fallback — does NOT contain any end-call phrases
-    return "Sorry, I missed that — could you say that again?"
+    return "Sorry,?"
