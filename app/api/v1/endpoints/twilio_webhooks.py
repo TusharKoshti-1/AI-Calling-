@@ -1,12 +1,10 @@
 """
 app.api.v1.endpoints.twilio_webhooks
 ────────────────────────────────────
-All Twilio-facing endpoints. Thin HTTP shell — all logic lives in the
-CallOrchestrator. Paths are namespaced under /webhooks/twilio/ so they
-cannot accidentally clash with /api/ admin routes.
+All Twilio-facing endpoints. Thin HTTP shell — logic lives in the
+CallOrchestrator, which resolves the owning user from the call SID.
 
-Twilio signature verification is applied to every mutating webhook via
-`verify_twilio_signature`. It can be disabled via env var for local dev.
+Twilio signature verification guards all mutating webhooks.
 """
 from __future__ import annotations
 
@@ -23,9 +21,6 @@ log = get_logger(__name__)
 
 router = APIRouter(prefix="/webhooks/twilio", tags=["twilio"])
 
-# NB: the GET endpoints (/opening-audio, /reply-audio) do not need signature
-# verification because Twilio does not sign GET fetches of <Play> URLs.
-
 
 @router.post(
     "/greeting",
@@ -36,11 +31,8 @@ async def twiml_greeting(
     To:      Annotated[str | None, Form()] = None,
     From:    Annotated[str | None, Form()] = None,
 ) -> Response:
-    """Fired when the recipient picks up. Plays the AI opening line."""
     xml = await call_orchestrator.handle_greeting(
-        sid=CallSid or "",
-        to_number=To or "",
-        from_number=From or "",
+        sid=CallSid or "", to_number=To or "", from_number=From or "",
     )
     return Response(content=xml, media_type="text/xml")
 
@@ -55,11 +47,8 @@ async def process_speech(
     To:           Annotated[str | None, Form()] = None,
     From:         Annotated[str | None, Form()] = None,
 ) -> Response:
-    """Fired after each <Gather> turn. Sends transcript to LLM + TTS."""
     xml = await call_orchestrator.handle_speech(
-        sid=CallSid or "",
-        to_number=To or "",
-        from_number=From or "",
+        sid=CallSid or "", to_number=To or "", from_number=From or "",
         speech=(SpeechResult or "").strip(),
     )
     return Response(content=xml, media_type="text/xml")
@@ -67,7 +56,6 @@ async def process_speech(
 
 @router.get("/opening-audio")
 async def opening_audio(sid: str = "") -> Response:
-    """Serves the pre-generated AI opening-line audio."""
     audio = call_orchestrator.get_opening_audio(sid)
     if audio:
         return Response(
@@ -80,7 +68,6 @@ async def opening_audio(sid: str = "") -> Response:
 
 @router.get("/reply-audio")
 async def reply_audio(sid: str = "") -> Response:
-    """Serves the pre-generated reply audio for a turn."""
     audio = await call_orchestrator.get_reply_audio(sid)
     if audio:
         return Response(
@@ -129,9 +116,7 @@ async def call_status(
     return Response(content="OK", media_type="text/plain")
 
 
-# ── Back-compat aliases so existing Twilio configs don't break ─────
-# The legacy app used top-level paths like /twiml-greeting and /call-status.
-# These thin forwarders keep old Twilio numbers working during rollout.
+# ── Legacy aliases for existing Twilio number configurations ──
 legacy_router = APIRouter(tags=["twilio-legacy"])
 
 

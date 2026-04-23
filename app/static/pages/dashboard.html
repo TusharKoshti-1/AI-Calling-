@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Dashboard · CallSara</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <script>window.CALLSARA_PAGE = "dashboard";</script>
+</head>
+<body>
+
+<div id="sidebar-slot"></div>
+
+<div class="main">
+  <div id="topbar-slot"></div>
+
+  <div class="pages">
+    <div class="page active">
+      <div class="page-body">
+
+        <!-- Stats -->
+        <div class="stats">
+          <div class="stat gold">
+            <div class="stat-icon">📞</div>
+            <div class="stat-n" id="st-total">0</div>
+            <div class="stat-l">Total Calls</div>
+            <div class="stat-s" id="st-today">0 today</div>
+          </div>
+          <div class="stat green">
+            <div class="stat-icon">✅</div>
+            <div class="stat-n" id="st-ans">0</div>
+            <div class="stat-l">Answered</div>
+            <div class="stat-s" id="st-avg">avg —</div>
+          </div>
+          <div class="stat fire">
+            <div class="stat-icon">🔥</div>
+            <div class="stat-n" id="st-hot">0</div>
+            <div class="stat-l">Hot Leads</div>
+            <div class="stat-s" id="st-hot-today">0 today</div>
+          </div>
+          <div class="stat red">
+            <div class="stat-icon">📵</div>
+            <div class="stat-n" id="st-fail">0</div>
+            <div class="stat-l">No Answer</div>
+            <div class="stat-s" id="st-ring">0 ringing</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div>
+            <div class="card">
+              <div class="card-hd">
+                <div class="card-title">📞 Quick Dial</div>
+              </div>
+              <div class="dial-body">
+                <label class="fl">Phone Number</label>
+                <div class="phone-row">
+                  <input id="qPhoneInput" class="ph-input" type="tel" placeholder="+971 50 123 4567"/>
+                  <button class="btn btn-gold" id="qCallBtn">Call</button>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-hd">
+                <div class="card-title">🔥 Hot Leads</div>
+                <a class="btn btn-ghost btn-sm" href="/hot">View all</a>
+              </div>
+              <div id="hotWidget" style="max-height:280px;overflow-y:auto">
+                <div class="tbl-empty" style="padding:24px 18px"><p>No hot leads yet</p></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:0">
+            <div class="card-hd">
+              <div class="card-title">📄 Recent Calls</div>
+            </div>
+            <div class="filter-bar" id="db-filters">
+              <input class="search-box" id="db-search" placeholder="Search..."/>
+              <button class="ftab on" data-filter="all">All</button>
+              <button class="ftab" data-filter="answered">Answered</button>
+              <button class="ftab" data-filter="completed">Completed</button>
+              <button class="ftab" data-filter="no-answer">No Answer</button>
+              <div class="sp"></div>
+              <div class="hot-tog" id="db-hot-tog">🔥 Hot only</div>
+            </div>
+            <div class="tbl-head">
+              <span>Phone</span><span>Status</span><span>Date & Time</span>
+              <span>Duration</span><span>Lead</span><span>Transcript</span><span>Actions</span>
+            </div>
+            <div class="tbl-body" id="db-tbl"></div>
+            <div class="pager" id="db-pager" style="display:none">
+              <span id="db-pg-info"></span>
+              <div class="pager-btns">
+                <button class="pbtn" id="db-prev">← Prev</button>
+                <button class="pbtn" id="db-next">Next →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Call detail modal (shared across pages) -->
+<div class="overlay" id="detailOverlay">
+  <div class="modal">
+    <div class="modal-hd">
+      <div>
+        <div class="modal-phone" id="m-phone">—</div>
+        <div class="modal-meta" id="m-meta"></div>
+      </div>
+      <button class="close-x" id="modal-close">×</button>
+    </div>
+    <div class="modal-body" id="m-body">
+      <div class="loading-t">Loading transcript...</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/layout.js"></script>
+<script src="/static/js/pages/calls-table.js"></script>
+<script src="/static/js/pages/modal.js"></script>
+<script src="/static/js/pages/dialer.js"></script>
+<script src="/static/js/pages/stats.js"></script>
+<script src="/static/js/pages/dashboard.js"></script>
+</body>
+</html>

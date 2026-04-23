@@ -1,7 +1,8 @@
 """
 app.services.llm.groq
 ─────────────────────
-Groq Chat Completions provider (OpenAI-compatible endpoint).
+Groq Chat Completions provider. Stateless — caller passes model and
+(optional) api_key per call.
 """
 from __future__ import annotations
 
@@ -26,9 +27,11 @@ class GroqProvider:
         history: list[dict[str, str]] | None = None,
         system_prompt: str,
         model: str | None = None,
+        api_key: str | None = None,
     ) -> str:
         s = get_settings()
-        if not s.groq_api_key:
+        effective_key = (api_key or s.groq_api_key or "").strip()
+        if not effective_key:
             log.error("Groq API key is not configured.")
             return FALLBACK_REPLY
 
@@ -38,13 +41,13 @@ class GroqProvider:
         messages.append({"role": "user", "content": customer_text})
 
         payload = {
-            "model": model or s.groq_model,
+            "model": (model or s.groq_model),
             "messages": messages,
             "temperature": s.groq_temperature,
             "max_tokens": s.groq_max_tokens,
         }
         headers = {
-            "Authorization": f"Bearer {s.groq_api_key}",
+            "Authorization": f"Bearer {effective_key}",
             "Content-Type": "application/json",
         }
 

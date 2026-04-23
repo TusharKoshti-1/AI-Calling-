@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Hot Leads · CallSara</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <script>window.CALLSARA_PAGE = "hot";</script>
+</head>
+<body>
+
+<div id="sidebar-slot"></div>
+
+<div class="main">
+  <div id="topbar-slot"></div>
+
+  <div class="pages">
+    <div class="page active">
+      <div class="page-body">
+
+        <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+          <div class="stat fire">
+            <div class="stat-icon">🔥</div>
+            <div class="stat-n" id="hl-count">0</div>
+            <div class="stat-l">Total Hot Leads</div>
+          </div>
+          <div class="stat gold">
+            <div class="stat-icon">📅</div>
+            <div class="stat-n" id="hl-today">0</div>
+            <div class="stat-l">Today</div>
+          </div>
+          <div class="stat green">
+            <div class="stat-icon">⏱</div>
+            <div class="stat-n" id="hl-avg">—</div>
+            <div class="stat-l">Avg Duration</div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:0">
+          <div class="card-hd">
+            <div class="card-title">🔥 Hot Leads — All Time</div>
+          </div>
+          <div class="tbl-head">
+            <span>Phone</span><span>Status</span><span>Date & Time</span>
+            <span>Duration</span><span>Lead</span><span>Transcript</span><span>Actions</span>
+          </div>
+          <div class="tbl-body" id="hot-tbl"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="detailOverlay">
+  <div class="modal">
+    <div class="modal-hd">
+      <div>
+        <div class="modal-phone" id="m-phone">—</div>
+        <div class="modal-meta" id="m-meta"></div>
+      </div>
+      <button class="close-x" id="modal-close">×</button>
+    </div>
+    <div class="modal-body" id="m-body">
+      <div class="loading-t">Loading transcript...</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/layout.js"></script>
+<script src="/static/js/pages/calls-table.js"></script>
+<script src="/static/js/pages/modal.js"></script>
+<script src="/static/js/pages/stats.js"></script>
+<script src="/static/js/pages/hot.js"></script>
+</body>
+</html>

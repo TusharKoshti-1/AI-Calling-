@@ -1,13 +1,12 @@
 """
 app.core.config
 ───────────────
-Typed, validated application settings loaded from environment / .env.
-
-All secrets are read from the environment — NEVER hardcode in source.
-Use `get_settings()` for a cached singleton accessor.
+Typed application settings loaded from environment / .env.
+All secrets are read from the environment — never hardcode in source.
 """
 from __future__ import annotations
 
+import secrets
 from functools import lru_cache
 from typing import Literal
 
@@ -16,8 +15,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Runtime configuration for the whole application."""
-
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
@@ -32,8 +29,20 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: str = "*"
 
-    # ── Auth ──────────────────────────────────────────────────
-    admin_api_key: str = ""
+    # ── Session / JWT signing ────────────────────────────────
+    # Opaque session tokens are signed with this secret. In production
+    # this MUST be set to a long random string. In dev we generate one
+    # per process so restarts invalidate old cookies.
+    session_secret: str = Field(
+        default_factory=lambda: secrets.token_urlsafe(32),
+        description="HMAC secret for session tokens. Must be set in prod.",
+    )
+    session_ttl_hours: int = 24 * 30
+    session_cookie_name: str = "callsara_session"
+    session_cookie_secure: bool = False   # set True behind HTTPS in prod
+    session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+
+    # ── Twilio signature verification ────────────────────────
     verify_twilio_signature: bool = False
 
     # ── Twilio ────────────────────────────────────────────────
@@ -53,7 +62,6 @@ class Settings(BaseSettings):
     openai_temperature: float = 0.3
     openai_max_tokens: int = 100
 
-    # ── LLM provider default ──────────────────────────────────
     llm_provider: Literal["groq", "openai"] = "groq"
 
     # ── Cartesia ──────────────────────────────────────────────
@@ -75,11 +83,16 @@ class Settings(BaseSettings):
     supabase_db_pool_min: int = 1
     supabase_db_pool_max: int = 10
 
-    # ── Agent defaults ────────────────────────────────────────
+    # ── Agent defaults (seed for new users) ──────────────────
     agent_name: str = "Sara"
     agency_name: str = "Prestige Properties Dubai"
 
-    # ── Computed helpers ──────────────────────────────────────
+    # ── Signup policy ────────────────────────────────────────
+    # If false, only the first user can self-register; subsequent users
+    # must be invited (future feature).
+    allow_public_signup: bool = True
+
+    # ── Computed helpers ─────────────────────────────────────
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
@@ -98,5 +111,4 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Return the cached application settings singleton."""
     return Settings()

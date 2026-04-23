@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Sign In · CallSara</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <link rel="stylesheet" href="/static/css/auth.css"/>
+</head>
+<body class="auth-body">
+
+<form class="auth-card" id="signinForm">
+  <div class="auth-brand">
+    <div class="auth-brand-name">CallSara</div>
+    <div class="auth-brand-tag">AI Calling Platform</div>
+  </div>
+
+  <div class="auth-title">Welcome back</div>
+  <div class="auth-subtitle">Sign in to continue to your dashboard.</div>
+
+  <div class="auth-field">
+    <label class="auth-label" for="email">Email</label>
+    <input class="auth-input" id="email" type="email" autocomplete="email" required placeholder="you@example.com"/>
+  </div>
+
+  <div class="auth-field">
+    <label class="auth-label" for="password">Password</label>
+    <input class="auth-input" id="password" type="password" autocomplete="current-password" required placeholder="••••••••"/>
+  </div>
+
+  <button type="submit" class="auth-submit" id="submitBtn">Sign in</button>
+
+  <div class="auth-err" id="err"></div>
+
+  <div class="auth-divider"></div>
+
+  <div class="auth-switch">
+    Don't have an account?  <a href="/signup">Create one</a>
+  </div>
+</form>
+
+<script src="/static/js/api.js"></script>
+<script>
+(function () {
+  const { api } = window.CallSaraAPI;
+  const form = document.getElementById('signinForm');
+  const errEl = document.getElementById('err');
+  const btn = document.getElementById('submitBtn');
+
+  function showError(msg) {
+    errEl.textContent = msg;
+    errEl.classList.add('show');
+  }
+
+  function getNextUrl() {
+    const params = new URLSearchParams(location.search);
+    const n = params.get('next') || '';
+    // Only allow same-origin relative paths to prevent open redirects.
+    if (n && n.startsWith('/') && !n.startsWith('//')) return n;
+    return '/dashboard';
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.classList.remove('show');
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+    try {
+      await api('/api/auth/signin', 'POST', {
+        email: document.getElementById('email').value.trim(),
+        password: document.getElementById('password').value,
+      });
+      location.assign(getNextUrl());
+    } catch (err) {
+      showError(err.message || 'Sign in failed.');
+      btn.disabled = false;
+      btn.textContent = 'Sign in';
+    }
+  });
+})();
+</script>
+</body>
+</html>

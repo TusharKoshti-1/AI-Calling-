@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>New Call · CallSara</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <script>window.CALLSARA_PAGE = "dialer";</script>
+</head>
+<body>
+
+<div id="sidebar-slot"></div>
+
+<div class="main">
+  <div id="topbar-slot"></div>
+
+  <div class="pages">
+    <div class="page active">
+      <div class="page-body">
+        <div style="max-width:520px">
+
+          <div class="card">
+            <div class="card-hd"><div class="card-title">📞 Single Call</div></div>
+            <div class="dial-body">
+              <label class="fl">Phone Number (with country code)</label>
+              <div class="phone-row">
+                <input id="sPhoneInput" class="ph-input" type="tel" placeholder="+971 50 123 4567"/>
+                <button class="btn btn-gold" id="sCallBtn">Call Now</button>
+              </div>
+              <div style="margin-top:10px;font-size:12px;color:var(--t3)">
+                Calling from <span id="fromNum" style="color:var(--t2);font-family:'DM Mono',monospace">—</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-hd"><div class="card-title">📋 Bulk Dial</div></div>
+            <div class="dial-body">
+              <label class="fl">Phone Numbers (one per line)</label>
+              <textarea class="bulk-ta" id="bulkInput" rows="6"
+                placeholder="+971501234567&#10;+971509876543&#10;+919876543210&#10;+447911123456"></textarea>
+              <div style="display:flex;gap:8px;margin-top:10px">
+                <button class="btn btn-gold" id="bulkCallBtn" style="flex:1;justify-content:center">
+                  Start Bulk Calling
+                </button>
+              </div>
+              <div class="bulk-prog" id="bulkProg"></div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/layout.js"></script>
+<script src="/static/js/pages/dialer.js"></script>
+</body>
+</html>

@@ -1,0 +1,149 @@
+/* ────────────────────────────────────────────────────────────
+ * auth.css — signin / signup pages
+ * Uses the same tokens as app.css (included before this file).
+ * ──────────────────────────────────────────────────────────── */
+
+body.auth-body {
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 20% 20%, rgba(201,168,76,.08), transparent 40%),
+    radial-gradient(circle at 80% 80%, rgba(74,158,255,.05), transparent 40%),
+    var(--bg);
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg2);
+  border: 1px solid var(--b);
+  border-radius: var(--r3);
+  padding: 36px 32px 32px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .35);
+}
+
+.auth-brand {
+  text-align: center;
+  margin-bottom: 28px;
+}
+.auth-brand-name {
+  font-family: 'Playfair Display', serif;
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--gold);
+  letter-spacing: .5px;
+}
+.auth-brand-tag {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--t3);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  font-family: 'DM Mono', monospace;
+}
+
+.auth-title {
+  font-family: 'Playfair Display', serif;
+  font-size: 20px;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--t);
+}
+.auth-subtitle {
+  font-size: 13px;
+  color: var(--t2);
+  margin-bottom: 22px;
+}
+
+.auth-field {
+  margin-bottom: 14px;
+}
+.auth-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--t2);
+  margin-bottom: 6px;
+  font-family: 'DM Mono', monospace;
+}
+.auth-input {
+  width: 100%;
+  padding: 11px 13px;
+  background: var(--s);
+  border: 1px solid var(--b2);
+  border-radius: var(--r);
+  color: var(--t);
+  font-size: 14px;
+  font-family: 'DM Sans', sans-serif;
+  outline: none;
+  transition: border-color .15s, background .15s;
+}
+.auth-input:focus {
+  border-color: var(--gold);
+  background: var(--s2);
+}
+.auth-input::placeholder { color: var(--t3); }
+
+.auth-submit {
+  width: 100%;
+  margin-top: 8px;
+  padding: 12px;
+  background: var(--gold);
+  color: #0b0e14;
+  border: 0;
+  border-radius: var(--r);
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background .15s, transform .05s;
+  font-family: 'DM Sans', sans-serif;
+}
+.auth-submit:hover { background: var(--gold2); }
+.auth-submit:active { transform: translateY(1px); }
+.auth-submit:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+.auth-err {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--red2);
+  border: 1px solid rgba(240, 96, 96, .35);
+  color: var(--red);
+  border-radius: var(--r);
+  font-size: 12px;
+  display: none;
+}
+.auth-err.show { display: block; }
+
+.auth-switch {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--t2);
+}
+.auth-switch a {
+  color: var(--gold);
+  text-decoration: none;
+  font-weight: 500;
+}
+.auth-switch a:hover { text-decoration: underline; }
+
+.auth-divider {
+  margin: 20px 0 16px;
+  height: 1px;
+  background: var(--b);
+}
+
+.auth-note {
+  font-size: 11px;
+  color: var(--t3);
+  text-align: center;
+  line-height: 1.5;
+}

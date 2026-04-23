@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Settings · CallSara</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <script>window.CALLSARA_PAGE = "settings";</script>
+</head>
+<body>
+
+<div id="sidebar-slot"></div>
+
+<div class="main">
+  <div id="topbar-slot"></div>
+
+  <div class="pages">
+    <div class="page active">
+      <div class="page-body">
+        <div style="max-width:900px">
+
+          <!-- Agent Identity -->
+          <div class="card">
+            <div class="card-hd"><div class="card-title">👤 Agent Identity</div></div>
+            <div class="dial-body">
+              <div class="settings-grid">
+                <div class="field-group">
+                  <label class="f-label">Agent Name</label>
+                  <div class="f-sub">The name the AI introduces itself as on calls.</div>
+                  <input class="f-input" id="s-agent-name" placeholder="Sara"/>
+                </div>
+                <div class="field-group">
+                  <label class="f-label">Agency Name</label>
+                  <div class="f-sub">Your real estate company name.</div>
+                  <input class="f-input" id="s-agency-name" placeholder="Prestige Properties Dubai"/>
+                </div>
+              </div>
+              <div class="save-bar">
+                <button class="btn btn-gold" id="saveIdentityBtn">Save Identity</button>
+                <span class="save-msg" id="identity-saved">✓ Saved</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- LLM Provider -->
+          <div class="card">
+            <div class="card-hd"><div class="card-title">🧠 LLM Provider</div></div>
+            <div class="dial-body">
+
+              <div class="field-group" style="margin-bottom:18px">
+                <label class="f-label">Active LLM</label>
+                <div class="f-sub">Choose which AI model powers the call responses.</div>
+                <div style="display:flex;gap:10px;margin-top:8px">
+                  <button id="llm-btn-groq"   class="btn btn-gold"  style="min-width:110px">⚡ Groq</button>
+                  <button id="llm-btn-openai" class="btn btn-ghost" style="min-width:110px">🤖 OpenAI</button>
+                </div>
+                <div id="llm-active-label" style="margin-top:8px;font-size:12px;color:var(--gold);font-family:'DM Mono',monospace"></div>
+              </div>
+
+              <div id="llm-groq-section">
+                <div class="settings-grid">
+                  <div class="field-group settings-full">
+                    <label class="f-label">Groq Model</label>
+                    <div class="f-sub">e.g. llama-3.3-70b-versatile, mixtral-8x7b-32768, gemma2-9b-it</div>
+                    <input class="f-input" id="s-groq-model" placeholder="llama-3.3-70b-versatile"/>
+                  </div>
+                </div>
+                <div class="save-bar">
+                  <button class="btn btn-gold" id="saveLLMBtn1">Save Groq Settings</button>
+                  <span class="save-msg" id="llm-saved">✓ Saved</span>
+                </div>
+              </div>
+
+              <div id="llm-openai-section" style="display:none">
+                <div class="settings-grid">
+                  <div class="field-group settings-full">
+                    <label class="f-label">OpenAI API Key</label>
+                    <div class="f-sub">Stored securely against your account only.</div>
+                    <input class="f-input" id="s-openai-key" type="password" placeholder="sk-proj-..."/>
+                  </div>
+                  <div class="field-group settings-full">
+                    <label class="f-label">OpenAI Model</label>
+                    <div class="f-sub">e.g. gpt-4o-mini (fast &amp; cheap), gpt-4o (best quality), gpt-3.5-turbo (economy)</div>
+                    <input class="f-input" id="s-openai-model" placeholder="gpt-4o-mini"/>
+                  </div>
+                </div>
+                <div style="background:var(--gold3);border:1px solid var(--gold2);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--t2)">
+                  💡 <strong style="color:var(--gold)">Recommended:</strong>
+                  <span style="margin-left:4px"><code>gpt-4o-mini</code> — best price/performance &nbsp;|&nbsp;
+                  <code>gpt-4o</code> — highest quality &nbsp;|&nbsp;
+                  <code>gpt-3.5-turbo</code> — lowest cost</span>
+                </div>
+                <div class="save-bar">
+                  <button class="btn btn-gold" id="saveLLMBtn2">Save OpenAI Settings</button>
+                  <span class="save-msg" id="llm-saved-2">✓ Saved</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- System Prompt -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="card-title">🤖 AI System Prompt</div>
+              <button class="btn btn-ghost btn-sm" id="resetPromptBtn">Reset to default</button>
+            </div>
+            <div class="dial-body">
+              <div class="field-group">
+                <label class="f-label">System Prompt</label>
+                <div class="f-sub">Controls how your AI agent behaves, what languages to use, when to end the call, and how to detect hot leads.</div>
+                <textarea class="f-textarea" id="s-system-prompt" rows="22"></textarea>
+              </div>
+              <div class="save-bar">
+                <button class="btn btn-gold" id="savePromptBtn">Save Prompt</button>
+                <span class="save-msg" id="prompt-saved">✓ Saved — next call will use new prompt</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/layout.js"></script>
+<script src="/static/js/pages/settings.js"></script>
+</body>
+</html>

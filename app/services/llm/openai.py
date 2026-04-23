@@ -1,11 +1,10 @@
 """
 app.services.llm.openai
 ───────────────────────
-OpenAI Chat Completions provider. The API key can be supplied:
-  1. Via the OPENAI_API_KEY env var (baseline), or
-  2. Via the dashboard Settings page (stored in DB, injected per-call).
+OpenAI Chat Completions provider.
 
-The runtime key takes precedence when both are present.
+In SaaS mode the OpenAI API key is per-user — passed in on each call
+rather than held in a process-wide slot. The provider is stateless.
 """
 from __future__ import annotations
 
@@ -23,27 +22,6 @@ FALLBACK_REPLY = "Sorry, I missed that — could you say that again?"
 class OpenAIProvider:
     name = "openai"
 
-    def __init__(self) -> None:
-        # Runtime override — set by SettingsService when the user saves a
-        # key in the dashboard. Checked before falling back to env config.
-        self._runtime_api_key: str = ""
-        self._runtime_model: str = ""
-
-    def set_runtime_overrides(self, *, api_key: str = "", model: str = "") -> None:
-        """Inject dashboard-configured credentials without touching env vars."""
-        if api_key:
-            self._runtime_api_key = api_key.strip()
-        if model:
-            self._runtime_model = model.strip()
-
-    def _resolve_api_key(self) -> str:
-        return self._runtime_api_key or get_settings().openai_api_key
-
-    def _resolve_model(self, model: str | None) -> str:
-        if model:
-            return model
-        return self._runtime_model or get_settings().openai_model
-
     async def complete(
         self,
         customer_text: str,
@@ -51,16 +29,14 @@ class OpenAIProvider:
         history: list[dict[str, str]] | None = None,
         system_prompt: str,
         model: str | None = None,
+        api_key: str | None = None,
     ) -> str:
         s = get_settings()
-        api_key = self._resolve_api_key()
-        chosen_model = self._resolve_model(model)
+        effective_key = (api_key or s.openai_api_key or "").strip()
+        chosen_model = (model or s.openai_model).strip() or "gpt-4o-mini"
 
-        if not api_key or not api_key.startswith("sk-"):
-            log.error(
-                "OpenAI API key missing or invalid. "
-                "Set it in Settings → LLM Provider, or OPENAI_API_KEY env."
-            )
+        if not effective_key or not effective_key.startswith("sk-"):
+            log.error("OpenAI API key missing or invalid (no per-user key, no env).")
             return FALLBACK_REPLY
 
         log.info("OpenAI → model=%s", chosen_model)
@@ -77,7 +53,7 @@ class OpenAIProvider:
             "max_completion_tokens": s.openai_max_tokens,
         }
         headers = {
-            "Authorization": f"Bearer {api_key}",
+            "Authorization": f"Bearer {effective_key}",
             "Content-Type": "application/json",
         }
 

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>AI Voice · CallSara</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <script>window.CALLSARA_PAGE = "voice";</script>
+</head>
+<body>
+
+<div id="sidebar-slot"></div>
+
+<div class="main">
+  <div id="topbar-slot"></div>
+
+  <div class="pages">
+    <div class="page active">
+      <div class="page-body">
+        <div style="max-width:920px">
+
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-hd">
+              <div class="card-title">🎙️ Active Voice</div>
+              <span id="active-voice-name" style="font-size:12px;color:var(--gold);font-family:'DM Mono',monospace;background:var(--gold3);padding:3px 12px;border-radius:20px">Loading...</span>
+            </div>
+            <div style="padding:12px 18px;font-size:12px;color:var(--t3)">
+              The active voice is used on all your outbound calls. Click <strong style="color:var(--t2)">Use This Voice</strong> on any card to switch instantly.
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-hd"><div class="card-title">💬 Preview Text</div></div>
+            <div style="padding:14px 18px">
+              <label class="fl">Text to speak in preview</label>
+              <input class="ph-input" id="preview-text" style="width:100%"
+                value="Hello, I'm Sara from Prestige Properties Dubai. Are you looking to invest in a property, or is this somewhere you'd like to live?"/>
+            </div>
+          </div>
+
+          <div class="vg-label">🇮🇳 Indian Accent</div>
+          <div id="indian-voices" class="voice-grid"></div>
+
+          <div class="vg-label" style="margin-top:22px">🇦🇪 Arabic Accent</div>
+          <div id="arabic-voices" class="voice-grid"></div>
+
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/layout.js"></script>
+<script src="/static/js/pages/voice.js"></script>
+</body>
+</html>

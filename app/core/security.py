@@ -1,63 +1,110 @@
 """
 app.core.security
 ─────────────────
-Authentication & webhook signature verification.
+Authentication dependencies:
 
-Two layers of protection:
-  • Admin API endpoints are guarded by a shared API key (header or query).
-  • Twilio webhooks are verified via X-Twilio-Signature HMAC.
+  • `get_current_user`     — returns the logged-in user, or raises AuthError.
+  • `get_optional_user`    — returns the user or None (for pages that render
+                             sign-in links vs. dashboard).
+  • `verify_twilio_signature` — HMAC-verify Twilio webhook bodies.
 
-For true multi-tenant SaaS auth, replace `admin_api_key_dep` with a real
-JWT / Supabase Auth dependency. The surface area is already abstracted
-behind a single dependency so the swap is mechanical.
+Session cookies are opaque tokens; the DB is the source of truth.
 """
 from __future__ import annotations
 
 import base64
 import hashlib
 import hmac
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import Depends, Header, Query, Request
+from fastapi import Cookie, Depends, Request
 
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AuthError
+from app.core.session_tokens import hash_token, verify_token_shape
 
 
 # ═══════════════════════════════════════════════════════════════
-# Admin API key
+# Auth principal
 # ═══════════════════════════════════════════════════════════════
-async def require_admin_api_key(
+@dataclass(frozen=True)
+class AuthUser:
+    id: str
+    email: str
+    full_name: str | None
+    is_admin: bool
+
+
+# ═══════════════════════════════════════════════════════════════
+# Current-user resolution
+# ═══════════════════════════════════════════════════════════════
+async def _lookup_user_by_session(token: str | None, secret: str) -> AuthUser | None:
+    """Shared helper — returns AuthUser if the session is valid & live,
+    else None. Never raises; caller decides what to do with None."""
+    if not token or not verify_token_shape(token, secret):
+        return None
+
+    # Late import — the DB pool is optional during module import.
+    from app.db.repositories.sessions import SessionsRepository
+    from app.db.repositories.users import UsersRepository
+
+    row = await SessionsRepository().find_live(hash_token(token))
+    if row is None:
+        return None
+
+    user = await UsersRepository().get_by_id(row["user_id"])
+    if user is None or not user.get("is_active", True):
+        return None
+
+    return AuthUser(
+        id=str(user["id"]),
+        email=user["email"],
+        full_name=user.get("full_name"),
+        is_admin=bool(user.get("is_admin", False)),
+    )
+
+
+async def get_current_user(
     settings: Annotated[Settings, Depends(get_settings)],
-    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
-    api_key: Annotated[str | None, Query(alias="api_key")] = None,
-) -> None:
-    """FastAPI dependency that enforces a valid admin API key.
+    request: Request,
+    session_cookie: Annotated[str | None, Cookie(alias="callsara_session")] = None,
+) -> AuthUser:
+    """FastAPI dependency — 401s if the caller isn't signed in."""
+    # Allow the cookie name to be overridden via settings; FastAPI's Cookie
+    # binding is static so we fall back to manually reading the header.
+    token = session_cookie or request.cookies.get(settings.session_cookie_name)
+    user = await _lookup_user_by_session(token, settings.session_secret)
+    if user is None:
+        raise AuthError("Not authenticated.")
+    return user
 
-    In non-production environments with no key configured, access is open
-    (so local dev doesn't need extra setup). In production, a key MUST be set.
-    """
-    expected = (settings.admin_api_key or "").strip()
-    if not expected:
-        if settings.is_production:
-            raise AuthError(
-                "ADMIN_API_KEY is not configured — refusing to serve admin API "
-                "in production without auth."
-            )
-        return  # open in dev
 
-    provided = (x_api_key or api_key or "").strip()
-    if not provided or not hmac.compare_digest(provided, expected):
-        raise AuthError("Invalid or missing API key.")
+async def get_optional_user(
+    settings: Annotated[Settings, Depends(get_settings)],
+    request: Request,
+    session_cookie: Annotated[str | None, Cookie(alias="callsara_session")] = None,
+) -> AuthUser | None:
+    """Like get_current_user, but returns None instead of raising."""
+    token = session_cookie or request.cookies.get(settings.session_cookie_name)
+    return await _lookup_user_by_session(token, settings.session_secret)
+
+
+async def require_admin(
+    user: Annotated[AuthUser, Depends(get_current_user)],
+) -> AuthUser:
+    """Dependency that requires an admin user."""
+    if not user.is_admin:
+        raise AuthError("Admin privileges required.")
+    return user
 
 
 # ═══════════════════════════════════════════════════════════════
 # Twilio signature verification
 # ═══════════════════════════════════════════════════════════════
 def _compute_twilio_signature(auth_token: str, url: str, params: dict[str, str]) -> str:
-    """Reproduce Twilio's signing algorithm:
-      sorted(params) concatenated onto the URL, HMAC-SHA1, base64-encoded.
-    """
+    """Per Twilio: base64( HMAC-SHA1( auth_token, url + sorted(k+v for params) ))"""
     data = url + "".join(f"{k}{v}" for k, v in sorted(params.items()))
     mac = hmac.new(auth_token.encode("utf-8"), data.encode("utf-8"), hashlib.sha1)
     return base64.b64encode(mac.digest()).decode("utf-8")
@@ -67,22 +114,16 @@ async def verify_twilio_signature(
     request: Request,
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> None:
-    """FastAPI dependency that verifies a request originated from Twilio.
-
-    Can be disabled via `VERIFY_TWILIO_SIGNATURE=false` (useful for local dev
-    with a plain HTTP tunnel that mangles the URL).
-    """
+    """Reject webhooks that don't carry a valid X-Twilio-Signature."""
     if not settings.verify_twilio_signature:
         return
     if not settings.twilio_auth_token:
-        # Can't verify without the token — treat as misconfiguration
         raise AuthError("Twilio signature verification enabled but auth token missing.")
 
     signature = request.headers.get("X-Twilio-Signature", "")
     if not signature:
         raise AuthError("Missing X-Twilio-Signature header.")
 
-    # Twilio signs the full URL as the caller sees it. Respect proxy headers.
     proto = request.headers.get("x-forwarded-proto", request.url.scheme)
     host = request.headers.get("x-forwarded-host") or request.url.netloc
     url = f"{proto}://{host}{request.url.path}"
@@ -95,3 +136,11 @@ async def verify_twilio_signature(
 
     if not hmac.compare_digest(expected, signature):
         raise AuthError("Twilio signature mismatch.")
+
+
+# ═══════════════════════════════════════════════════════════════
+# Utility for auth endpoints
+# ═══════════════════════════════════════════════════════════════
+def session_expiry(hours: int) -> datetime:
+    from datetime import timedelta
+    return datetime.now(timezone.utc) + timedelta(hours=hours)

@@ -1,7 +1,8 @@
 """
 app.db.repositories.settings
 ────────────────────────────
-Key/value application settings stored in the `settings` table.
+Per-user key/value settings. A `NULL` user_id denotes a global default
+(used as a fallback for users who haven't set the key yet).
 """
 from __future__ import annotations
 
@@ -9,41 +10,72 @@ from app.db.session import get_pool
 
 
 class SettingsRepository:
-    async def get(self, key: str, default: str = "") -> str:
+    async def get_all_for_user(self, user_id: str) -> dict[str, str]:
+        """Return the effective settings dict for a user — their own keys
+        take precedence over global defaults."""
         pool = get_pool()
         async with pool.acquire() as conn:
-            val = await conn.fetchval(
-                "SELECT value FROM settings WHERE key = $1", key
-            )
-            return val if val is not None else default
-
-    async def set(self, key: str, value: str) -> None:
-        pool = get_pool()
-        async with pool.acquire() as conn:
-            await conn.execute(
+            rows = await conn.fetch(
                 """
-                INSERT INTO settings (key, value) VALUES ($1, $2)
-                ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
+                SELECT DISTINCT ON (key) key, value
+                FROM settings
+                WHERE user_id = $1 OR user_id IS NULL
+                ORDER BY key,
+                    CASE WHEN user_id IS NULL THEN 1 ELSE 0 END
                 """,
-                key, value,
+                user_id,
             )
-
-    async def get_all(self) -> dict[str, str]:
-        pool = get_pool()
-        async with pool.acquire() as conn:
-            rows = await conn.fetch("SELECT key, value FROM settings")
             return {r["key"]: r["value"] for r in rows}
 
-    async def set_many(self, items: dict[str, str]) -> None:
+    async def set_for_user(self, user_id: str, key: str, value: str) -> None:
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            # Look for an existing user-specific row first.
+            existing_id = await conn.fetchval(
+                "SELECT id FROM settings WHERE user_id = $1 AND key = $2",
+                user_id, key,
+            )
+            if existing_id:
+                await conn.execute(
+                    "UPDATE settings SET value = $1, updated_at = NOW() WHERE id = $2",
+                    value, existing_id,
+                )
+            else:
+                await conn.execute(
+                    """
+                    INSERT INTO settings (user_id, key, value)
+                    VALUES ($1, $2, $3)
+                    """,
+                    user_id, key, value,
+                )
+
+    async def set_many_for_user(self, user_id: str, items: dict[str, str]) -> None:
         if not items:
             return
         pool = get_pool()
         async with pool.acquire() as conn, conn.transaction():
             for k, v in items.items():
-                await conn.execute(
-                    """
-                    INSERT INTO settings (key, value) VALUES ($1, $2)
-                    ON CONFLICT (key) DO UPDATE SET value = $2, updated_at = NOW()
-                    """,
-                    k, v,
+                existing_id = await conn.fetchval(
+                    "SELECT id FROM settings WHERE user_id = $1 AND key = $2",
+                    user_id, k,
                 )
+                if existing_id:
+                    await conn.execute(
+                        "UPDATE settings SET value = $1, updated_at = NOW() WHERE id = $2",
+                        v, existing_id,
+                    )
+                else:
+                    await conn.execute(
+                        "INSERT INTO settings (user_id, key, value) VALUES ($1, $2, $3)",
+                        user_id, k, v,
+                    )
+
+    async def get_global(self, key: str, default: str = "") -> str:
+        """Read a system-wide global default (user_id IS NULL)."""
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            val = await conn.fetchval(
+                "SELECT value FROM settings WHERE user_id IS NULL AND key = $1",
+                key,
+            )
+            return val if val is not None else default

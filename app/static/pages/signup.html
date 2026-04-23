@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>Create Account · CallSara</title>
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/css/app.css"/>
+  <link rel="stylesheet" href="/static/css/auth.css"/>
+</head>
+<body class="auth-body">
+
+<form class="auth-card" id="signupForm">
+  <div class="auth-brand">
+    <div class="auth-brand-name">CallSara</div>
+    <div class="auth-brand-tag">AI Calling Platform</div>
+  </div>
+
+  <div class="auth-title">Create your account</div>
+  <div class="auth-subtitle">Each account gets its own isolated workspace.</div>
+
+  <div class="auth-field">
+    <label class="auth-label" for="fullName">Full name</label>
+    <input class="auth-input" id="fullName" type="text" autocomplete="name" placeholder="Jane Doe"/>
+  </div>
+
+  <div class="auth-field">
+    <label class="auth-label" for="email">Email</label>
+    <input class="auth-input" id="email" type="email" autocomplete="email" required placeholder="you@example.com"/>
+  </div>
+
+  <div class="auth-field">
+    <label class="auth-label" for="password">Password</label>
+    <input class="auth-input" id="password" type="password" autocomplete="new-password" required minlength="8" placeholder="At least 8 characters"/>
+  </div>
+
+  <button type="submit" class="auth-submit" id="submitBtn">Create account</button>
+
+  <div class="auth-err" id="err"></div>
+
+  <div class="auth-divider"></div>
+
+  <div class="auth-switch">
+    Already have an account?  <a href="/signin">Sign in</a>
+  </div>
+  <div class="auth-note" style="margin-top:12px">
+    By creating an account you agree to comply with local calling regulations
+    (TCPA, GDPR, etc.) when using this platform.
+  </div>
+</form>
+
+<script src="/static/js/api.js"></script>
+<script>
+(function () {
+  const { api } = window.CallSaraAPI;
+  const form = document.getElementById('signupForm');
+  const errEl = document.getElementById('err');
+  const btn = document.getElementById('submitBtn');
+
+  function showError(msg) {
+    errEl.textContent = msg;
+    errEl.classList.add('show');
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.classList.remove('show');
+    btn.disabled = true;
+    btn.textContent = 'Creating account…';
+
+    const password = document.getElementById('password').value;
+    if (password.length < 8) {
+      showError('Password must be at least 8 characters.');
+      btn.disabled = false; btn.textContent = 'Create account';
+      return;
+    }
+
+    try {
+      await api('/api/auth/signup', 'POST', {
+        email: document.getElementById('email').value.trim(),
+        password: password,
+        full_name: document.getElementById('fullName').value.trim() || null,
+      });
+      location.assign('/dashboard');
+    } catch (err) {
+      showError(err.message || 'Signup failed.');
+      btn.disabled = false;
+      btn.textContent = 'Create account';
+    }
+  });
+})();
+</script>
+</body>
+</html>

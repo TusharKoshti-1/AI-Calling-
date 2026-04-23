@@ -1,7 +1,12 @@
 """
 app.db.repositories.calls
 ─────────────────────────
-All SQL reads/writes for the `calls` aggregate (calls + derived stats).
+User-scoped CRUD on the `calls` table. Every method takes `user_id` so
+SaaS tenants can't see each other's calls.
+
+Lookups by SID (from Twilio webhooks) are scoped via the SID's stored
+`user_id` — once the outbound call is registered, subsequent webhook
+events are matched to the right tenant automatically.
 """
 from __future__ import annotations
 
@@ -11,17 +16,15 @@ from app.db.session import get_pool
 
 
 class CallsRepository:
-    """All CRUD on the `calls` table. Pure data access; no business logic."""
-
     # ── Writes ────────────────────────────────────────────────
-    async def upsert(self, sid: str, data: dict[str, Any]) -> str | None:
+    async def upsert(self, sid: str, user_id: str, data: dict[str, Any]) -> str | None:
         pool = get_pool()
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                INSERT INTO calls (sid, phone, from_number, status, hot_lead,
+                INSERT INTO calls (sid, user_id, phone, from_number, status, hot_lead,
                                    duration_sec, started_at, agent_name, agency_name)
-                VALUES ($1,$2,$3,$4,$5,$6,NOW(),$7,$8)
+                VALUES ($1,$2,$3,$4,$5,$6,$7,NOW(),$8,$9)
                 ON CONFLICT (sid) DO UPDATE SET
                     status       = EXCLUDED.status,
                     hot_lead     = GREATEST(calls.hot_lead, EXCLUDED.hot_lead),
@@ -29,7 +32,7 @@ class CallsRepository:
                     updated_at   = NOW()
                 RETURNING id
                 """,
-                sid,
+                sid, user_id,
                 data.get("phone", ""),
                 data.get("from_number", ""),
                 data.get("status", "ringing"),
@@ -40,10 +43,11 @@ class CallsRepository:
             )
             return str(row["id"]) if row else None
 
-    async def update(self, sid: str, **fields: Any) -> None:
+    async def update_by_sid(self, sid: str, **fields: Any) -> None:
+        """Update by SID only (used from webhooks where we don't need the user_id
+        because the SID itself identifies a unique call). Whitelisted fields."""
         if not fields:
             return
-        # Whitelist to prevent SQL injection via field names.
         allowed = {
             "status", "hot_lead", "duration_sec", "recording_url",
             "recording_path", "transcript", "phone", "from_number",
@@ -52,7 +56,6 @@ class CallsRepository:
         safe = {k: v for k, v in fields.items() if k in allowed}
         if not safe:
             return
-
         set_clauses = [f"{k} = ${i + 2}" for i, k in enumerate(safe)]
         sql = (
             f"UPDATE calls SET {', '.join(set_clauses)}, updated_at = NOW() "
@@ -62,7 +65,7 @@ class CallsRepository:
         async with pool.acquire() as conn:
             await conn.execute(sql, sid, *safe.values())
 
-    async def finalize(
+    async def finalize_by_sid(
         self,
         sid: str,
         status: str,
@@ -82,7 +85,9 @@ class CallsRepository:
                 sid, status, duration_sec, recording_url, recording_path, transcript,
             )
 
-    async def set_recording(self, sid: str, recording_url: str, recording_path: str) -> None:
+    async def set_recording_by_sid(
+        self, sid: str, recording_url: str, recording_path: str
+    ) -> None:
         pool = get_pool()
         async with pool.acquire() as conn:
             await conn.execute(
@@ -93,29 +98,39 @@ class CallsRepository:
                 sid, recording_url, recording_path,
             )
 
-    # ── Reads ─────────────────────────────────────────────────
+    # ── Reads — always user-scoped ────────────────────────────
+    async def get_user_for_sid(self, sid: str) -> str | None:
+        """Look up which user owns a given call SID (used by webhooks)."""
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            val = await conn.fetchval(
+                "SELECT user_id::text FROM calls WHERE sid = $1", sid
+            )
+            return val
+
     async def list(
         self,
         *,
+        user_id: str,
         limit: int = 50,
         offset: int = 0,
         status: str | None = None,
         hot_only: bool = False,
         search: str | None = None,
     ) -> list[dict]:
-        conditions, values, idx = [], [], 1
+        conditions = ["user_id = $1"]
+        values: list[Any] = [user_id]
+        idx = 2
         if status and status != "all":
             conditions.append(f"status = ${idx}")
-            values.append(status)
-            idx += 1
+            values.append(status); idx += 1
         if hot_only:
             conditions.append("hot_lead = TRUE")
         if search:
             conditions.append(f"phone ILIKE ${idx}")
-            values.append(f"%{search}%")
-            idx += 1
+            values.append(f"%{search}%"); idx += 1
 
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        where = "WHERE " + " AND ".join(conditions)
         values.extend([limit, offset])
 
         sql = f"""
@@ -134,30 +149,34 @@ class CallsRepository:
     async def count(
         self,
         *,
+        user_id: str,
         status: str | None = None,
         hot_only: bool = False,
         search: str | None = None,
     ) -> int:
-        conditions, values, idx = [], [], 1
+        conditions = ["user_id = $1"]
+        values: list[Any] = [user_id]
+        idx = 2
         if status and status != "all":
             conditions.append(f"status = ${idx}")
-            values.append(status)
-            idx += 1
+            values.append(status); idx += 1
         if hot_only:
             conditions.append("hot_lead = TRUE")
         if search:
             conditions.append(f"phone ILIKE ${idx}")
-            values.append(f"%{search}%")
-            idx += 1
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            values.append(f"%{search}%"); idx += 1
+
+        where = "WHERE " + " AND ".join(conditions)
         sql = f"SELECT COUNT(*) FROM calls {where}"
         pool = get_pool()
         async with pool.acquire() as conn:
             result = await conn.fetchval(sql, *values)
             return int(result or 0)
 
-    async def stats(self) -> dict[str, Any]:
+    async def stats(self, user_id: str) -> dict[str, Any]:
         pool = get_pool()
         async with pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM call_stats")
+            row = await conn.fetchrow(
+                "SELECT * FROM call_stats_for($1)", user_id
+            )
             return dict(row) if row else {}
