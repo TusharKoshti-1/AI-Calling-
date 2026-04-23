@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>CallSara</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<link rel="stylesheet" href="/static/css/app.css"/>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<nav class="sidebar">
+  <div class="brand">
+    <div class="brand-name">CallSara</div>
+    <div class="brand-tag" id="agencyTag">AI Real Estate Dialer</div>
+  </div>
+  <div class="nav">
+    <div class="nav-group">Main</div>
+    <div class="nav-item active" data-page="dashboard" onclick="goPage('dashboard',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </div>
+    <div class="nav-item" data-page="calls" onclick="goPage('calls',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+      All Calls
+    </div>
+    <div class="nav-item" data-page="hot" onclick="goPage('hot',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      Hot Leads
+    </div>
+    <div class="nav-group">Tools</div>
+    <div class="nav-item" data-page="dialer" onclick="goPage('dialer',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      New Call
+    </div>
+    <div class="nav-item" data-page="settings" onclick="goPage('settings',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2"/></svg>
+      Settings
+    </div>
+    <div class="nav-item" data-page="voice" onclick="goPage('voice',this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 1a3 3 0 00-3 3v8a3 3 0 006 0V4a3 3 0 00-3-3z"/><path d="M19 10v2a7 7 0 01-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+      AI Voice
+    </div>
+  </div>
+  <div class="sidebar-foot">
+    <div class="live-dot">
+      <div class="dot" id="liveDot"></div>
+      <span id="liveLabel">Checking...</span>
+    </div>
+  </div>
+</nav>
+
+<!-- MAIN -->
+<div class="main">
+  <div class="topbar">
+    <div class="page-title" id="pgTitle">Dashboard</div>
+    <div class="topbar-r">
+      <div class="agency-pill" id="agencyPill">—</div>
+      <button class="btn btn-gold btn-sm" onclick="goPage('dialer',document.querySelector('[data-page=dialer]'))">
+        📞 New Call
+      </button>
+    </div>
+  </div>
+
+  <div class="pages">
+
+    <!-- ══ DASHBOARD ══════════════════════════════════════════════ -->
+    <div class="page active" id="p-dashboard">
+      <div class="page-body">
+        <div class="stats">
+          <div class="stat gold">
+            <div class="stat-icon">📞</div>
+            <div class="stat-n" id="st-total">0</div>
+            <div class="stat-l">Total Calls</div>
+            <div class="stat-s" id="st-today">0 today</div>
+          </div>
+          <div class="stat green">
+            <div class="stat-icon">✅</div>
+            <div class="stat-n" id="st-ans">0</div>
+            <div class="stat-l">Answered</div>
+            <div class="stat-s" id="st-avg">avg —</div>
+          </div>
+          <div class="stat fire">
+            <div class="stat-icon">🔥</div>
+            <div class="stat-n" id="st-hot">0</div>
+            <div class="stat-l">Hot Leads</div>
+            <div class="stat-s" id="st-hot-today">0 today</div>
+          </div>
+          <div class="stat red">
+            <div class="stat-icon">📵</div>
+            <div class="stat-n" id="st-fail">0</div>
+            <div class="stat-l">No Answer</div>
+            <div class="stat-s" id="st-ring">0 ringing</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <!-- LEFT -->
+          <div>
+            <!-- Quick dial -->
+            <div class="card">
+              <div class="card-hd">
+                <div class="card-title">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+                  Quick Dial
+                </div>
+              </div>
+              <div class="dial-body">
+                <label class="fl">Phone Number</label>
+                <div class="phone-row">
+                  <input id="qPhoneInput" class="ph-input" type="tel" placeholder="+971 50 123 4567"/>
+                  <button class="btn btn-gold" id="qCallBtn" onclick="makeCall('qPhoneInput','qCallBtn')">Call</button>
+                </div>
+              </div>
+            </div>
+            <!-- Hot leads widget -->
+            <div class="card">
+              <div class="card-hd">
+                <div class="card-title">🔥 Hot Leads</div>
+                <button class="btn btn-ghost btn-sm" onclick="goPage('hot',document.querySelector('[data-page=hot]'))">View all</button>
+              </div>
+              <div id="hotWidget" style="max-height:280px;overflow-y:auto">
+                <div class="tbl-empty" style="padding:24px 18px"><p>No hot leads yet</p></div>
+              </div>
+            </div>
+          </div>
+          <!-- RIGHT: recent calls -->
+          <div class="card" style="margin-bottom:0">
+            <div class="card-hd">
+              <div class="card-title">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                Recent Calls
+              </div>
+            </div>
+            <div class="filter-bar" id="db-filters">
+              <input class="search-box" id="db-search" placeholder="Search..." oninput="dbSearch()"/>
+              <button class="ftab on" onclick="dbFilter('all',this)">All</button>
+              <button class="ftab" onclick="dbFilter('answered',this)">Answered</button>
+              <button class="ftab" onclick="dbFilter('completed',this)">Completed</button>
+              <button class="ftab" onclick="dbFilter('no-answer',this)">No Answer</button>
+              <div class="sp"></div>
+              <div class="hot-tog" id="db-hot-tog" onclick="dbToggleHot()">🔥 Hot only</div>
+            </div>
+            <div class="tbl-head">
+              <span>Phone</span><span>Status</span><span>Date & Time</span>
+              <span>Duration</span><span>Lead</span><span>Transcript</span><span>Actions</span>
+            </div>
+            <div class="tbl-body" id="db-tbl"></div>
+            <div class="pager" id="db-pager" style="display:none">
+              <span id="db-pg-info"></span>
+              <div class="pager-btns">
+                <button class="pbtn" id="db-prev" onclick="dbPrev()">← Prev</button>
+                <button class="pbtn" id="db-next" onclick="dbNext()">Next →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ ALL CALLS ══════════════════════════════════════════════ -->
+    <div class="page" id="p-calls">
+      <div class="page-body">
+        <div class="card" style="margin-bottom:0">
+          <div class="card-hd">
+            <div class="card-title">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.02 5.13 2 2 0 012 3h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 16.92z"/></svg>
+              All Calls
+            </div>
+            <div style="font-size:12px;color:var(--t3)" id="calls-count-label">Loading...</div>
+          </div>
+          <div class="filter-bar">
+            <input class="search-box" id="calls-search" placeholder="Search..." oninput="callsSearch()"/>
+            <button class="ftab on" onclick="callsFilter('all',this)">All</button>
+            <button class="ftab" onclick="callsFilter('answered',this)">Answered</button>
+            <button class="ftab" onclick="callsFilter('completed',this)">Completed</button>
+            <button class="ftab" onclick="callsFilter('no-answer',this)">No Answer</button>
+            <button class="ftab" onclick="callsFilter('busy',this)">Busy</button>
+            <div class="sp"></div>
+            <div class="hot-tog" id="calls-hot-tog" onclick="callsToggleHot()">🔥 Hot only</div>
+          </div>
+          <div class="tbl-head">
+            <span>Phone</span><span>Status</span><span>Date & Time</span>
+            <span>Duration</span><span>Lead</span><span>Transcript</span><span>Actions</span>
+          </div>
+          <div class="tbl-body" id="calls-tbl"></div>
+          <div class="pager" id="calls-pager" style="display:none">
+            <span id="calls-pg-info"></span>
+            <div class="pager-btns">
+              <button class="pbtn" id="calls-prev" onclick="callsPrev()">← Prev</button>
+              <button class="pbtn" id="calls-next" onclick="callsNext()">Next →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ HOT LEADS ═════════════════════════════════════════════ -->
+    <div class="page" id="p-hot">
+      <div class="page-body">
+        <div class="stats" style="grid-template-columns:repeat(3,1fr)">
+          <div class="stat fire">
+            <div class="stat-icon">🔥</div>
+            <div class="stat-n" id="hl-count">0</div>
+            <div class="stat-l">Total Hot Leads</div>
+          </div>
+          <div class="stat gold">
+            <div class="stat-icon">📅</div>
+            <div class="stat-n" id="hl-today">0</div>
+            <div class="stat-l">Today</div>
+          </div>
+          <div class="stat green">
+            <div class="stat-icon">⏱</div>
+            <div class="stat-n" id="hl-avg">—</div>
+            <div class="stat-l">Avg Duration</div>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:0">
+          <div class="card-hd">
+            <div class="card-title">🔥 Hot Leads — All Time</div>
+          </div>
+          <div class="tbl-head">
+            <span>Phone</span><span>Status</span><span>Date & Time</span>
+            <span>Duration</span><span>Lead</span><span>Transcript</span><span>Actions</span>
+          </div>
+          <div class="tbl-body" id="hot-tbl"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ DIALER ════════════════════════════════════════════════ -->
+    <div class="page" id="p-dialer">
+      <div class="page-body">
+        <div style="max-width:520px">
+          <div class="card">
+            <div class="card-hd"><div class="card-title">📞 Single Call</div></div>
+            <div class="dial-body">
+              <label class="fl">Phone Number (with country code)</label>
+              <div class="phone-row">
+                <input id="sPhoneInput" class="ph-input" type="tel" placeholder="+971 50 123 4567"/>
+                <button class="btn btn-gold" id="sCallBtn" onclick="makeCall('sPhoneInput','sCallBtn')">Call Now</button>
+              </div>
+              <div style="margin-top:10px;font-size:12px;color:var(--t3)">
+                Calling from <span id="fromNum" style="color:var(--t2);font-family:'DM Mono',monospace">—</span>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-hd"><div class="card-title">📋 Bulk Dial</div></div>
+            <div class="dial-body">
+              <label class="fl">Phone Numbers (one per line)</label>
+              <textarea class="bulk-ta" id="bulkInput" rows="6"
+                placeholder="+971501234567&#10;+971509876543&#10;+919876543210&#10;+447911123456"></textarea>
+              <div style="display:flex;gap:8px;margin-top:10px">
+                <button class="btn btn-gold" style="flex:1;justify-content:center" onclick="bulkCall()">
+                  Start Bulk Calling
+                </button>
+              </div>
+              <div class="bulk-prog" id="bulkProg"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ SETTINGS ══════════════════════════════════════════════ -->
+    <div class="page" id="p-settings">
+      <div class="page-body">
+        <div style="max-width:900px">
+
+          <!-- Agent Identity -->
+          <div class="card">
+            <div class="card-hd"><div class="card-title">👤 Agent Identity</div></div>
+            <div class="dial-body">
+              <div class="settings-grid">
+                <div class="field-group">
+                  <label class="f-label">Agent Name</label>
+                  <div class="f-sub">The name the AI introduces itself as on calls</div>
+                  <input class="f-input" id="s-agent-name" placeholder="Sara"/>
+                </div>
+                <div class="field-group">
+                  <label class="f-label">Agency Name</label>
+                  <div class="f-sub">Your real estate company name</div>
+                  <input class="f-input" id="s-agency-name" placeholder="Prestige Properties Dubai"/>
+                </div>
+              </div>
+              <div class="save-bar">
+                <button class="btn btn-gold" onclick="saveIdentity()">Save Identity</button>
+                <span class="save-msg" id="identity-saved">✓ Saved</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- LLM Provider -->
+          <div class="card">
+            <div class="card-hd"><div class="card-title">🧠 LLM Provider</div></div>
+            <div class="dial-body">
+
+              <!-- Provider toggle -->
+              <div class="field-group" style="margin-bottom:18px">
+                <label class="f-label">Active LLM</label>
+                <div class="f-sub">Choose which AI model powers the call responses.</div>
+                <div style="display:flex;gap:10px;margin-top:8px">
+                  <button id="llm-btn-groq"   class="btn btn-gold"  onclick="selectLLM('groq')"  style="min-width:110px">⚡ Groq</button>
+                  <button id="llm-btn-openai" class="btn btn-ghost" onclick="selectLLM('openai')" style="min-width:110px">🤖 OpenAI</button>
+                </div>
+                <div id="llm-active-label" style="margin-top:8px;font-size:12px;color:var(--gold);font-family:'DM Mono',monospace"></div>
+              </div>
+
+              <!-- Groq settings (shown when groq is active) -->
+              <div id="llm-groq-section">
+                <div class="settings-grid">
+                  <div class="field-group settings-full">
+                    <label class="f-label">Groq Model</label>
+                    <div class="f-sub">e.g. llama-3.3-70b-versatile, mixtral-8x7b-32768, gemma2-9b-it</div>
+                    <input class="f-input" id="s-groq-model" placeholder="llama-3.3-70b-versatile"/>
+                  </div>
+                </div>
+                <div class="save-bar">
+                  <button class="btn btn-gold" onclick="saveLLMSettings()">Save Groq Settings</button>
+                  <span class="save-msg" id="llm-saved">✓ Saved</span>
+                </div>
+              </div>
+
+              <!-- OpenAI settings (shown when openai is active) -->
+              <div id="llm-openai-section" style="display:none">
+                <div class="settings-grid">
+                  <div class="field-group settings-full">
+                    <label class="f-label">OpenAI API Key</label>
+                    <div class="f-sub">Your OpenAI secret key (sk-…). Stored securely in the database.</div>
+                    <input class="f-input" id="s-openai-key" type="password" placeholder="sk-proj-..."/>
+                  </div>
+                  <div class="field-group settings-full">
+                    <label class="f-label">OpenAI Model</label>
+                    <div class="f-sub">e.g. gpt-4o-mini (fast &amp; cheap), gpt-4o (best quality), gpt-3.5-turbo (economy)</div>
+                    <input class="f-input" id="s-openai-model" placeholder="gpt-4o-mini"/>
+                  </div>
+                </div>
+                <div style="background:var(--gold3);border:1px solid var(--gold2);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--t2)">
+                  💡 <strong style="color:var(--gold)">Recommended models:</strong>
+                  <span style="margin-left:4px"><code>gpt-4o-mini</code> — best price/performance for call bots &nbsp;|&nbsp;
+                  <code>gpt-4o</code> — highest quality &nbsp;|&nbsp;
+                  <code>gpt-3.5-turbo</code> — lowest cost</span>
+                </div>
+                <div class="save-bar">
+                  <button class="btn btn-gold" onclick="saveLLMSettings()">Save OpenAI Settings</button>
+                  <span class="save-msg" id="llm-saved">✓ Saved</span>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- System Prompt -->
+          <div class="card">
+            <div class="card-hd">
+              <div class="card-title">🤖 AI System Prompt</div>
+              <button class="btn btn-ghost btn-sm" onclick="resetPrompt()">Reset to default</button>
+            </div>
+            <div class="dial-body">
+              <div class="field-group">
+                <label class="f-label">System Prompt</label>
+                <div class="f-sub">Controls how Sara behaves, what language to use, when to end the call, and how to detect hot leads.</div>
+                <textarea class="f-textarea" id="s-system-prompt" rows="22"></textarea>
+              </div>
+              <div class="save-bar">
+                <button class="btn btn-gold" onclick="savePrompt()">Save Prompt</button>
+                <span class="save-msg" id="prompt-saved">✓ Saved — next call will use new prompt</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+
+    <!-- ══ AI VOICE ══════════════════════════════════════════════ -->
+    <div class="page" id="p-voice">
+      <div class="page-body">
+        <div style="max-width:920px">
+
+          <div class="card" style="margin-bottom:16px">
+            <div class="card-hd">
+              <div class="card-title">🎙️ Active Voice</div>
+              <span id="active-voice-name" style="font-size:12px;color:var(--gold);font-family:'DM Mono',monospace;background:var(--gold3);padding:3px 12px;border-radius:20px">Loading...</span>
+            </div>
+            <div style="padding:12px 18px;font-size:12px;color:var(--t3)">
+              The active voice is used on all outbound calls. Click <strong style="color:var(--t2)">Use This Voice</strong> on any card to switch instantly.
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:20px">
+            <div class="card-hd"><div class="card-title">💬 Preview Text</div></div>
+            <div style="padding:14px 18px">
+              <label class="fl">Text to speak in preview</label>
+              <input class="ph-input" id="preview-text" style="width:100%"
+                value="Hello, I'm Sara from Prestige Properties Dubai. Are you looking to invest in a property, or is this somewhere you'd like to live?"/>
+            </div>
+          </div>
+
+          <div class="vg-label">🇮🇳 Indian Accent</div>
+          <div id="indian-voices" class="voice-grid"></div>
+
+          <div class="vg-label" style="margin-top:22px">🇦🇪 Arabic Accent</div>
+          <div id="arabic-voices" class="voice-grid"></div>
+
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /pages -->
+</div><!-- /main -->
+
+<!-- CALL DETAIL MODAL -->
+<div class="overlay" id="detailOverlay" onclick="closeModal(event)">
+  <div class="modal">
+    <div class="modal-hd">
+      <div>
+        <div class="modal-phone" id="m-phone">—</div>
+        <div class="modal-meta" id="m-meta"></div>
+      </div>
+      <button class="close-x" onclick="closeModal()">×</button>
+    </div>
+    <div class="modal-body" id="m-body">
+      <div class="loading-t">Loading transcript...</div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/app.js"></script>
+<script src="/static/js/voice.js"></script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+# docker-compose.yml — local development
+#
+# Usage:
+#   cp .env.example .env   # then fill in secrets
+#   docker compose up --build
+#
+# The app connects to your Supabase project over the network —
+# no local Postgres service is needed because we lean on the
+# pooler (port 6543) just like production.
+
+services:
+  app:
+    build: .
+    image: callsara:local
+    container_name: callsara
+    env_file: .env
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: DEBUG
+    ports:
+      - "${PORT:-8000}:8000"
+    # Live-reload during dev: mount the app dir and use --reload.
+    # Comment this out to mimic production exactly.
+    volumes:
+      - ./app:/app/app:ro
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0 --port 8000 --reload
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').status==200 else sys.exit(1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
