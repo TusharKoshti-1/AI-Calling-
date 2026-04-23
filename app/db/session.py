@@ -24,9 +24,9 @@ async def init_pool() -> asyncpg.Pool:
         return _pool
 
     s = get_settings()
-    if not s.supabase_db_host or not s.supabase_db_password:
+    if not s.supabase_db_host or not s.supabase_db_pass:
         raise ConfigurationError(
-            "Supabase DB credentials not set — check SUPABASE_DB_HOST / SUPABASE_DB_PASSWORD."
+            "Supabase DB credentials not set — check SUPABASE_DB_HOST / SUPABASE_DB_PASS."
         )
 
     try:
@@ -35,7 +35,7 @@ async def init_pool() -> asyncpg.Pool:
             port=s.supabase_db_port,
             database=s.supabase_db_name,
             user=s.supabase_db_user,
-            password=s.supabase_db_password,
+            password=s.supabase_db_pass,
             min_size=s.supabase_db_pool_min,
             max_size=s.supabase_db_pool_max,
             ssl="require",

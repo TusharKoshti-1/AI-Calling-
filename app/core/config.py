@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     supabase_db_port: int = 6543
     supabase_db_name: str = "postgres"
     supabase_db_user: str = ""
-    supabase_db_password: str = ""
+    supabase_db_pass: str = ""
     supabase_db_pool_min: int = 1
     supabase_db_pool_max: int = 10
 
