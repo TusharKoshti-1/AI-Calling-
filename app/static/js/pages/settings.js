@@ -11,7 +11,7 @@
       setVal('s-agent-name',    s.agent_name);
       setVal('s-agency-name',   s.agency_name);
       setVal('s-system-prompt', s.system_prompt);
-      const provider = (s.llm_provider || 'groq').toLowerCase();
+      const provider = (s.llm_provider || 'openai').toLowerCase();
       setLLMButtons(provider);
       setVal('s-groq-model',   s.groq_model   || 'llama-3.3-70b-versatile');
       setVal('s-openai-model', s.openai_model || 'gpt-4o-mini');

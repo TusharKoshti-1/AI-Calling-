@@ -95,7 +95,7 @@
     curBtnId = btnId;
 
     const text = document.getElementById('preview-text')?.value?.trim()
-      || "Hello, I'm Sara. Are you looking to invest in a property, or is this somewhere you'd like to live?";
+      || "Hi, this is your AI assistant calling. I'm just testing the voice quality — how does it sound?";
     const sid = voice.id.replace(/-/g, '').slice(0, 8);
 
     try {

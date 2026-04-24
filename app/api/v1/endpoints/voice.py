@@ -32,12 +32,17 @@ async def voice_preview(
     if not text:
         us = await settings_service.for_user(user.id)
         agent = us.get("agent_name", "Sara")
-        agency = us.get("agency_name", "our agency")
-        text = (
-            f"Hello, I'm {agent} from {agency}. "
-            f"Are you looking to invest in a property, or is this somewhere "
-            f"you'd like to live?"
-        )
+        agency = (us.get("agency_name") or "").strip()
+        if agency:
+            text = (
+                f"Hi, this is {agent} calling from {agency}. "
+                f"I'm just testing the voice quality — how does it sound?"
+            )
+        else:
+            text = (
+                f"Hi, this is {agent}. "
+                f"I'm just testing the voice quality — how does it sound?"
+            )
 
     try:
         log.info("Voice preview: voice=%s text='%s'", voice_id[:8], text[:60])

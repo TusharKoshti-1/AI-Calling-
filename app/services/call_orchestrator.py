@@ -386,11 +386,20 @@ class CallOrchestrator:
         except Exception as exc:
             log.error("[%s] Opening-line LLM error: %s", sid, exc)
             agent = us.get("agent_name", "Sara")
-            agency = us.get("agency_name", "our agency")
-            raw = (
-                f"Hi, this is {agent} calling from {agency} — "
-                f"is this a good time to speak for a minute?"
-            )
+            agency = (us.get("agency_name") or "").strip()
+            # Fallback opener. Only mentions the agency if the tenant has
+            # actually set one — otherwise we'd say "calling from ." which
+            # sounds broken.
+            if agency:
+                raw = (
+                    f"Hi, this is {agent} calling from {agency} — "
+                    f"is this a good time to speak for a minute?"
+                )
+            else:
+                raw = (
+                    f"Hi, this is {agent} calling — "
+                    f"is this a good time to speak for a minute?"
+                )
         cleaned = clean_reply(raw)
         log.info("[%s] AI opening: %s", sid, cleaned.text[:80])
         return cleaned.text

@@ -25,32 +25,48 @@ from app.services.http_client import get_openai_client
 
 log = get_logger(__name__)
 
-# Cheap + fast model for the fact-extraction pass. We don't need gpt-4o
-# quality here — the input is short, the output is tiny JSON, and this
-# runs AFTER the call has ended so latency is not user-visible.
+# Cheap + fast model for the fact-extraction pass. We don't need the
+# flagship model here — the input is short, the output is tiny JSON,
+# and this runs AFTER the call has ended so latency is not user-visible.
 _EXTRACTION_MODEL = "gpt-4o-mini"
 
-_EXTRACTION_SYSTEM = """You extract structured facts from a phone call transcript between a UAE car-service advisor (Sara) and a customer.
+# The extractor is deliberately VERTICAL-NEUTRAL. It doesn't assume the
+# tenant is running a car-service bot or a real-estate bot — it extracts
+# whatever facts the customer actually revealed, and leaves everything
+# else null. The vertical-specific fields (car_model, service_status)
+# are OPTIONAL — only filled when the call transcript actually mentions
+# them, otherwise omitted.
+_EXTRACTION_SYSTEM = """You extract structured facts from a phone call transcript between an AI phone assistant and a customer. The assistant might be calling for any kind of business — car service, real estate, clinic, gym, utility, sales follow-up, etc. Do not assume a specific vertical; extract whatever the customer actually said.
 
 Output ONLY a compact JSON object, nothing else — no prose, no markdown.
 
-Fields (ALL optional — omit any field you're not confident about, don't guess):
-  car_model          : string. Make+model if mentioned, e.g. "Nissan Patrol 2021", "Toyota Camry".
-  service_status     : string. One of "due", "overdue", "done recently", "scheduled", "not sure".
+Fields (ALL optional — omit any you can't fill confidently from the transcript):
+  topic_summary      : string. One short phrase describing WHY the call happened,
+                       as best you can tell (e.g. "car service reminder",
+                       "property inquiry follow-up", "appointment confirmation").
+  last_call_summary  : string. One SHORT sentence summarising how this call went.
   last_lead_status   : string. One of "hot", "warm", "cold".
-                       hot  = agreed to book / asked for a slot.
-                       warm = interested but not booking now.
-                       cold = not interested / avoided.
+                       hot  = customer agreed to book / take a next step.
+                       warm = interested but not committing now.
+                       cold = not interested / avoided the call.
   preferred_callback : string. e.g. "evenings", "after 6pm", "weekends", "next month".
-  notes              : string. One short sentence with anything genuinely useful for the NEXT call
-                       (e.g. "wife drives the car, call her instead", "car was in accident",
-                       "customer is abroad until March"). Omit if nothing notable.
-  last_call_summary  : string. One SHORT sentence summarising the call outcome.
+  notes              : string. One short sentence with anything useful for the NEXT
+                       call (e.g. "spouse handles this, call them instead",
+                       "customer is abroad until March", "prefers WhatsApp"). Omit
+                       if nothing notable.
+
+Vertical-specific fields (ONLY fill if the customer explicitly said so —
+otherwise OMIT the field entirely, do not guess):
+  car_model          : string. Make + model if mentioned, e.g. "Nissan Patrol 2021".
+                       Only for car-service calls. Leave out otherwise.
+  service_status     : string. One of "due", "overdue", "done recently",
+                       "scheduled", "not sure". Only for calls about servicing
+                       or appointments. Leave out otherwise.
 
 Rules:
-  - Use values the customer actually said. Do NOT invent.
-  - If the customer didn't mention their car model, OMIT car_model entirely.
-  - Keep strings short and lowercase unless they're proper nouns.
+  - Extract only what the customer actually said. Do NOT invent.
+  - Omit a field entirely rather than guessing.
+  - Keep strings short, plain text.
   - Return {} if there's nothing useful to extract."""
 
 
@@ -58,8 +74,10 @@ Rules:
 # the model hallucinates is silently dropped — defence in depth against
 # prompt injection via the transcript.
 _ALLOWED_EXTRACT_KEYS = frozenset({
-    "car_model", "service_status", "last_lead_status",
-    "preferred_callback", "notes", "last_call_summary",
+    "topic_summary", "last_call_summary", "last_lead_status",
+    "preferred_callback", "notes",
+    # Vertical-specific fields (only filled when the call mentioned them)
+    "car_model", "service_status",
 })
 
 
@@ -85,22 +103,36 @@ class MemoryService:
     def _format_for_prompt(row: dict[str, Any]) -> str:
         """Render a memory row as a compact, natural-sounding prompt block.
 
-        Careful with tone: the block is INFORMATION for Sara, not a script.
-        We explicitly DON'T instruct her to reference it aloud unless
-        natural. Otherwise she'd start every call with "I see your car is
-        a Toyota Camry" which feels creepy on a second call.
+        The block is INFORMATION for the AI, not a script to read aloud.
+        We explicitly DON'T instruct it to reference this verbatim on
+        every call — otherwise the agent would open with creepy "I see
+        you have a Toyota Camry" lines every time.
+
+        Fields are rendered only when populated. A brand-new memory row
+        (e.g. bumped call_count but no extracted facts yet) produces an
+        empty block so the prompt stays clean.
         """
         lines: list[str] = []
-        car = (row.get("car_model") or "").strip()
-        status = (row.get("service_status") or "").strip()
-        pref = (row.get("preferred_callback") or "").strip()
-        notes = (row.get("notes") or "").strip()
+
+        # Generic fields
+        topic = (row.get("topic_summary") or "").strip()
         last_summary = (row.get("last_call_summary") or "").strip()
         last_lead = (row.get("last_lead_status") or "").strip()
+        pref = (row.get("preferred_callback") or "").strip()
+        notes = (row.get("notes") or "").strip()
+        # Vertical-specific fields (may be absent / empty in many deployments)
+        car = (row.get("car_model") or "").strip()
+        status = (row.get("service_status") or "").strip()
         call_count = row.get("call_count") or 0
 
         if call_count and call_count > 1:
-            lines.append(f"You have spoken to this customer {call_count - 0} time(s) before.")
+            # call_count is bumped at call start, so "> 1" means there was
+            # at least one prior call before this one.
+            lines.append(
+                f"You have spoken to this customer {call_count - 1} time(s) before."
+            )
+        if topic:
+            lines.append(f"Known interest / reason for calling: {topic}.")
         if car:
             lines.append(f"Car on file: {car}.")
         if status:

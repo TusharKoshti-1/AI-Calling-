@@ -30,9 +30,10 @@ class CustomerMemoryRepository:
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
                 """
-                SELECT car_model, service_status, last_call_summary,
-                       preferred_callback, notes, last_lead_status,
-                       call_count, first_seen_at, last_seen_at
+                SELECT topic_summary, car_model, service_status,
+                       last_call_summary, preferred_callback, notes,
+                       last_lead_status, call_count,
+                       first_seen_at, last_seen_at
                 FROM customer_memory
                 WHERE user_id = $1 AND phone = $2
                 """,
@@ -69,6 +70,7 @@ class CustomerMemoryRepository:
         user_id: str,
         phone: str,
         *,
+        topic_summary: str | None = None,
         car_model: str | None = None,
         service_status: str | None = None,
         last_call_summary: str | None = None,
@@ -90,23 +92,24 @@ class CustomerMemoryRepository:
             await conn.execute(
                 """
                 INSERT INTO customer_memory (
-                    user_id, phone, car_model, service_status,
+                    user_id, phone, topic_summary, car_model, service_status,
                     last_call_summary, preferred_callback, notes,
                     last_lead_status, call_count,
                     first_seen_at, last_seen_at, updated_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 1, NOW(), NOW(), NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, NOW(), NOW(), NOW())
                 ON CONFLICT (user_id, phone) DO UPDATE SET
-                    car_model          = COALESCE($3, customer_memory.car_model),
-                    service_status     = COALESCE($4, customer_memory.service_status),
-                    last_call_summary  = COALESCE($5, customer_memory.last_call_summary),
-                    preferred_callback = COALESCE($6, customer_memory.preferred_callback),
-                    notes              = COALESCE($7, customer_memory.notes),
-                    last_lead_status   = COALESCE($8, customer_memory.last_lead_status),
+                    topic_summary      = COALESCE($3, customer_memory.topic_summary),
+                    car_model          = COALESCE($4, customer_memory.car_model),
+                    service_status     = COALESCE($5, customer_memory.service_status),
+                    last_call_summary  = COALESCE($6, customer_memory.last_call_summary),
+                    preferred_callback = COALESCE($7, customer_memory.preferred_callback),
+                    notes              = COALESCE($8, customer_memory.notes),
+                    last_lead_status   = COALESCE($9, customer_memory.last_lead_status),
                     last_seen_at       = NOW(),
                     updated_at         = NOW()
                 """,
                 user_id, phone,
-                car_model, service_status, last_call_summary,
+                topic_summary, car_model, service_status, last_call_summary,
                 preferred_callback, notes, last_lead_status,
             )

@@ -165,9 +165,14 @@ class Settings(BaseSettings):
     supabase_db_pool_min: int = 1
     supabase_db_pool_max: int = 10
 
-    # ── Agent defaults (seed for new users) ──────────────────
+    # ── Agent defaults (seed for new users only) ─────────────
+    # These are shown as placeholders / used when a tenant hasn't
+    # configured their own values yet. agent_name defaults to "Sara"
+    # because it's a neutral English name that works across verticals;
+    # agency_name is intentionally empty — the prompt template falls
+    # back to "our team" if the tenant hasn't set one yet.
     agent_name: str = "Sara"
-    agency_name: str = "Dubai Luxury Cars"
+    agency_name: str = ""
 
     # ── Signup policy ────────────────────────────────────────
     # If false, only the first user can self-register; subsequent users

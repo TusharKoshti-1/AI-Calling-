@@ -13,7 +13,7 @@
 <nav class="sidebar">
   <div class="brand">
     <div class="brand-name">CallSara</div>
-    <div class="brand-tag" id="agencyTag">AI Real Estate Dialer</div>
+    <div class="brand-tag" id="agencyTag">AI Calling Assistant</div>
   </div>
   <div class="nav">
     <div class="nav-group">Main</div>
@@ -281,8 +281,8 @@
                 </div>
                 <div class="field-group">
                   <label class="f-label">Agency Name</label>
-                  <div class="f-sub">Your real estate company name</div>
-                  <input class="f-input" id="s-agency-name" placeholder="Prestige Properties Dubai"/>
+                  <div class="f-sub">Your business name — the AI will say this on calls.</div>
+                  <input class="f-input" id="s-agency-name" placeholder="e.g. Your Business Name"/>
                 </div>
               </div>
               <div class="save-bar">
@@ -333,14 +333,14 @@
                   </div>
                   <div class="field-group settings-full">
                     <label class="f-label">OpenAI Model</label>
-                    <div class="f-sub">e.g. gpt-4o-mini (fast &amp; cheap), gpt-4o (best quality), gpt-3.5-turbo (economy)</div>
-                    <input class="f-input" id="s-openai-model" placeholder="gpt-4o-mini"/>
+                    <div class="f-sub">e.g. gpt-4o (best quality, recommended), gpt-4o-mini (fast &amp; cheap), gpt-3.5-turbo (economy)</div>
+                    <input class="f-input" id="s-openai-model" placeholder="gpt-4o"/>
                   </div>
                 </div>
                 <div style="background:var(--gold3);border:1px solid var(--gold2);border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:var(--t2)">
                   💡 <strong style="color:var(--gold)">Recommended models:</strong>
-                  <span style="margin-left:4px"><code>gpt-4o-mini</code> — best price/performance for call bots &nbsp;|&nbsp;
-                  <code>gpt-4o</code> — highest quality &nbsp;|&nbsp;
+                  <span style="margin-left:4px"><code>gpt-4o</code> — most natural, handles off-script well &nbsp;|&nbsp;
+                  <code>gpt-4o-mini</code> — cheaper and faster, more scripted &nbsp;|&nbsp;
                   <code>gpt-3.5-turbo</code> — lowest cost</span>
                 </div>
                 <div class="save-bar">
@@ -361,7 +361,7 @@
             <div class="dial-body">
               <div class="field-group">
                 <label class="f-label">System Prompt</label>
-                <div class="f-sub">Controls how Sara behaves, what language to use, when to end the call, and how to detect hot leads.</div>
+                <div class="f-sub">Controls how your AI agent behaves — tone, languages, off-script handling, lead classification, and when to end the call.</div>
                 <textarea class="f-textarea" id="s-system-prompt" rows="22"></textarea>
               </div>
               <div class="save-bar">
@@ -396,7 +396,7 @@
             <div style="padding:14px 18px">
               <label class="fl">Text to speak in preview</label>
               <input class="ph-input" id="preview-text" style="width:100%"
-                value="Hello, I'm Sara from Prestige Properties Dubai. Are you looking to invest in a property, or is this somewhere you'd like to live?"/>
+                value="Hi, this is your AI assistant calling. I'm just testing the voice quality — how does it sound?"/>
             </div>
           </div>
 

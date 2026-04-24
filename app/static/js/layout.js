@@ -61,7 +61,7 @@
       <nav class="sidebar">
         <div class="brand">
           <div class="brand-name">CallSara</div>
-          <div class="brand-tag" id="agencyTag">AI Real Estate Dialer</div>
+          <div class="brand-tag" id="agencyTag">AI Calling Assistant</div>
         </div>
         <div class="nav">${groups}</div>
         <div class="sidebar-foot">
