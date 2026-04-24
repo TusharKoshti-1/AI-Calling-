@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Form
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 
 from app.core.logging import get_logger
 from app.core.security import verify_twilio_signature
@@ -68,14 +68,22 @@ async def opening_audio(sid: str = "") -> Response:
 
 @router.get("/reply-audio")
 async def reply_audio(sid: str = "") -> Response:
-    audio = await call_orchestrator.get_reply_audio(sid)
-    if audio:
-        return Response(
-            content=audio,
-            media_type="audio/wav",
-            headers={"Cache-Control": "no-store"},
-        )
-    return Response(status_code=204)
+    """Stream the AI's reply audio to Twilio as it's produced.
+
+    Using a StreamingResponse here (rather than assembling a full WAV
+    server-side and awaiting it) is the final latency win — Twilio's
+    <Play> starts reading the body as soon as the first bytes arrive,
+    so the customer hears sentence 1 while the LLM is still writing
+    sentence 2.
+    """
+    generator = await call_orchestrator.stream_reply_audio(sid)
+    if generator is None:
+        return Response(status_code=204)
+    return StreamingResponse(
+        generator,
+        media_type="audio/wav",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.post(

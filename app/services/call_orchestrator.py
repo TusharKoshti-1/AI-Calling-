@@ -8,25 +8,36 @@ user_id is stored both in the DB (calls.user_id) and in the in-process
 state map. When Twilio hits a webhook we look up the user_id from the
 SID so every downstream action uses that user's settings.
 
-Latency design — streaming reply pipeline
-─────────────────────────────────────────
-When the customer finishes a turn we want the caller to hear the first
-syllable of the AI's reply as fast as possible. The classic approach
+Latency design — streaming everything
+─────────────────────────────────────
+When the customer finishes a turn we want the first syllable of the AI's
+reply in the caller's ear as fast as possible. The classic approach
 (await full LLM → await full TTS → hand WAV to Twilio) stacks those
-latencies serially: ~1–2 s LLM + ~0.5–1 s TTS + transport = painful.
+latencies serially and is painful.
 
-Instead we do:
-  1. Kick off a streaming LLM completion (for OpenAI — Groq stays on
-     the classic single-shot path since the SDK is non-streaming here).
-  2. As soon as the stream yields a speakable sentence fragment, fire
-     a TTS request for that fragment in parallel with the LLM still
-     generating the next sentence.
-  3. The /reply-audio endpoint awaits the background task, which in
-     turn concatenates every TTS chunk (in order) into one WAV Twilio
-     can <Play> seamlessly.
+Instead we run three stages in a pipeline:
+  1. LLM streaming completion — tokens arrive ~300 ms after the first
+     fetch; we watch for sentence boundaries and emit speakable chunks.
+  2. Parallel TTS — each sentence is synthesised by Cartesia concurrently
+     with the LLM still generating the next sentence.
+  3. Streaming HTTP response — /reply-audio is an async generator.
+     It awaits the FIRST WAV chunk and flushes its header + body to
+     Twilio immediately; subsequent chunks' audio bodies are appended
+     live. Twilio's <Play> starts playing as soon as it has enough
+     header + samples, so the caller hears sentence 1 while the LLM is
+     still writing sentence 2.
 
 Result: the customer typically hears the first word ~800–1200 ms sooner
-than before, and the rest of the sentence lands without a visible seam.
+than on a non-streaming pipeline, and the rest of the reply lands
+without a visible seam.
+
+Cross-call memory
+─────────────────
+Before each call we look up (user_id, phone) in customer_memory and
+inject a compact CUSTOMER CONTEXT block into the system prompt — so
+Sara "remembers" the car model, last service status, etc. After the
+call ends we run a cheap extraction pass on the transcript and upsert
+any new facts. See app/services/memory_service.py.
 
 Scaling:
   • The in-memory `_state` map works for one worker. To run multiple
@@ -36,6 +47,7 @@ Scaling:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -44,6 +56,7 @@ from app.db.repositories.calls import CallsRepository
 from app.db.repositories.messages import MessagesRepository
 from app.services.llm import llm_registry
 from app.services.llm.openai import OpenAIProvider
+from app.services.memory_service import memory_service
 from app.services.settings_service import UserSettings, settings_service
 from app.services.storage import storage
 from app.services.telephony import twiml
@@ -64,19 +77,31 @@ class CallState:
     history: list[dict[str, str]] = field(default_factory=list)
     started_at: str = ""
 
+    # Memory block to inject into every LLM prompt for this call.
+    # Resolved once at call start (or first webhook) and then reused —
+    # customer_memory doesn't change mid-call, so no point re-reading.
+    memory_context: str = ""
+
     # Opening-line audio is generated once at the greeting webhook and
     # cached here so the /opening-audio endpoint can serve it instantly.
     opening_audio: bytes | None = None
 
     # Streaming reply pipeline:
-    #   reply_audio_task — background task that will resolve to the
-    #                      concatenated WAV bytes for this turn. The
-    #                      /reply-audio endpoint awaits it.
-    #   pending_text     — the full text the LLM produced (post tag
-    #                      cleaning). Used as a fallback if the
-    #                      streaming TTS path fails and we need to
-    #                      synthesise from scratch.
-    reply_audio_task: asyncio.Task[bytes | None] | None = None
+    #   reply_audio_queue — async queue the background producer pushes
+    #                       TTS chunks into; /reply-audio drains it as
+    #                       a streaming response body. None = sentinel
+    #                       for end-of-stream. This is what lets the
+    #                       first sentence reach Twilio before the LLM
+    #                       has finished writing the second.
+    #   producer_task     — the asyncio task feeding that queue. Held
+    #                       so we can wait for it to finish and then
+    #                       read the full post-cleaning reply text.
+    #   pending_text      — the full text the LLM produced (post tag
+    #                       cleaning). Used as a fallback if the
+    #                       streaming TTS path fails and we need to
+    #                       synthesise from scratch.
+    reply_audio_queue: asyncio.Queue[bytes | None] | None = None
+    producer_task: asyncio.Task[None] | None = None
     pending_text: str = ""
 
 
@@ -159,6 +184,42 @@ def _concat_wavs(chunks: list[bytes]) -> bytes:
         return chunks[0]
 
 
+def _split_wav(blob: bytes) -> tuple[bytes, bytes]:
+    """Return (header_bytes, audio_body_bytes) for a WAV.
+
+    Header = everything up to and including the "data" chunk's size field.
+    Body   = the raw audio samples after that.
+    Returns (b"", blob) if the blob doesn't look like a WAV — callers
+    can still yield the body, we just can't rewrite header sizes.
+    """
+    if not blob or len(blob) < 12 or blob[:4] != b"RIFF":
+        return b"", blob
+    idx = blob.find(b"data")
+    if idx < 0 or idx + 8 > len(blob):
+        return b"", blob
+    end = idx + 8
+    return blob[:end], blob[end:]
+
+
+def _rewrite_sizes_unknown(header: bytes) -> bytes:
+    """Rewrite a WAV header's size fields to 0xFFFFFFFF ("unknown").
+
+    When we're streaming audio to Twilio we don't know the total size
+    in advance — the LLM might still be generating sentence 3. Twilio
+    and most WAV players treat 0xFFFFFFFF in the RIFF and data size
+    fields as "read until EOF" rather than trusting a byte count that
+    would otherwise be too small and cause playback to cut off early.
+    """
+    if len(header) < 8:
+        return header
+    out = bytearray(header)
+    # RIFF chunk size at bytes 4..7
+    out[4:8] = b"\xff\xff\xff\xff"
+    # Data chunk size = last 4 bytes of our "header slice"
+    out[-4:] = b"\xff\xff\xff\xff"
+    return bytes(out)
+
+
 # ═══════════════════════════════════════════════════════════════
 # Orchestrator
 # ═══════════════════════════════════════════════════════════════
@@ -177,7 +238,12 @@ class CallOrchestrator:
     async def register_outbound(
         self, sid: str, user_id: str, phone: str
     ) -> None:
-        """Record a call we just placed via Twilio."""
+        """Record a call we just placed via Twilio.
+
+        Also loads any prior customer_memory for this phone and attaches
+        it to the call state so every subsequent LLM call this turn sees
+        the context block.
+        """
         state = CallState(
             sid=sid,
             user_id=user_id,
@@ -186,6 +252,19 @@ class CallOrchestrator:
         )
         self._state.put(state)
         us = await settings_service.for_user(user_id)
+
+        # Load prior memory (if any) — runs in parallel with the DB upsert
+        # so we don't serialise the two network calls.
+        async def _load_memory() -> None:
+            state.memory_context = await memory_service.load_context_block(
+                user_id, phone,
+            )
+            if state.memory_context:
+                log.info("[%s] loaded memory context for %s", sid, phone)
+
+        _spawn(_load_memory())
+        _spawn(memory_service.record_call_start(user_id, phone))
+
         _spawn(
             self._calls.upsert(sid, user_id, {
                 "phone": phone,
@@ -226,6 +305,16 @@ class CallOrchestrator:
                 started_at=datetime.now(timezone.utc).isoformat(),
             )
             self._state.put(state)
+            # Inbound / post-restart path — load memory here since
+            # register_outbound wasn't called for this SID.
+            if to_number:
+                try:
+                    state.memory_context = await memory_service.load_context_block(
+                        user_id, to_number,
+                    )
+                except Exception as exc:
+                    log.error("[%s] memory load failed: %s", sid, exc)
+                _spawn(memory_service.record_call_start(user_id, to_number))
 
         us = await settings_service.for_user(user_id)
         _spawn(
@@ -265,8 +354,16 @@ class CallOrchestrator:
     async def _generate_opening_line(self, sid: str, us: UserSettings) -> str:
         provider = llm_registry.get(us.resolve_llm_provider())
         base_prompt = us.resolve_system_prompt()
+
+        # Attach the memory context (if any) to the base prompt. Done at
+        # prompt-build time rather than baked into resolve_system_prompt
+        # so that the setting is still stable/cacheable across users.
+        state = self._state.get(sid)
+        memory_block = state.memory_context if state else ""
+
         augmented = (
             base_prompt
+            + memory_block
             + "\n\n---\n[SYSTEM]: The call just connected. Deliver your opening line now. "
               "Do not include [END_CALL] or [HOT_LEAD]. One or two sentences only."
         )
@@ -350,11 +447,16 @@ class CallOrchestrator:
 
         # Kick off the streaming reply pipeline. We do NOT await it here —
         # we return TwiML immediately and let Twilio pull the audio from
-        # /reply-audio. That endpoint will await the background task.
+        # /reply-audio, which drains the queue as a streaming response.
         history_snapshot = list(state.history[:-1])  # immutable copy for the task
         provider_name = us.resolve_llm_provider()
-        state.reply_audio_task = asyncio.create_task(
-            self._produce_reply_audio(
+
+        # Fresh queue per turn. Old one (if any) gets GC'd — any leftover
+        # /reply-audio consumer on it is from a prior turn and already
+        # finished.
+        state.reply_audio_queue = asyncio.Queue(maxsize=32)
+        state.producer_task = asyncio.create_task(
+            self._stream_reply_audio(
                 sid=sid,
                 user_id=user_id,
                 us=us,
@@ -368,7 +470,7 @@ class CallOrchestrator:
         audio_url = f"{base}/webhooks/twilio/reply-audio?sid={sid}"
         return twiml.listen_with_play(audio_url)
 
-    async def _produce_reply_audio(
+    async def _stream_reply_audio(
         self,
         *,
         sid: str,
@@ -378,129 +480,171 @@ class CallOrchestrator:
         customer_text: str,
         history: list[dict[str, str]],
         t0: datetime,
-    ) -> bytes | None:
-        """Stream LLM → fire TTS per sentence in parallel → return WAV bytes.
+    ) -> None:
+        """Producer: stream LLM → fire TTS in parallel → push WAV chunks into queue.
 
-        Streaming path is used only for OpenAI; Groq callers fall back to
-        the non-streaming single-shot path transparently.
+        The audio HTTP response (/reply-audio) acts as the consumer. The
+        queue decouples them so the first TTS chunk can be flushed to
+        Twilio while the LLM is still generating the second sentence.
+
+        Pushes None as a sentinel when done. Errors always ensure a
+        terminating None is pushed so the consumer doesn't hang.
         """
-        system_prompt = us.resolve_system_prompt()
-        voice_id = us.resolve_voice_id()
-        model = (
-            us.get("openai_model") if provider_name == "openai"
-            else us.get("groq_model")
-        )
-        api_key = us.get("openai_api_key") if provider_name == "openai" else None
+        state = self._state.get(sid)
+        queue = state.reply_audio_queue if state else None
 
-        provider = llm_registry.get(provider_name)
-
-        # ── Path A: non-streaming provider (Groq) ──────────────────
-        if not isinstance(provider, OpenAIProvider):
-            try:
-                raw_reply = await provider.complete(
-                    customer_text,
-                    history=history,
-                    system_prompt=system_prompt,
-                    model=model,
-                    api_key=api_key,
-                )
-            except Exception as exc:
-                log.error("[%s] LLM error: %s", sid, exc)
-                raw_reply = "Sorry, I missed that — could you say that again?"
-
-            cleaned = clean_reply(raw_reply)
-            self._commit_reply_text(sid, user_id, cleaned.text, cleaned.hot_lead)
-            audio = await tts_provider.synthesize(cleaned.text, voice_id=voice_id)
-            t_total = (datetime.now(timezone.utc) - t0).total_seconds()
-            log.info("[%s] non-stream reply total %.2fs", sid, t_total)
-            return audio
-
-        # ── Path B: streaming provider (OpenAI) ────────────────────
-        # Fire a TTS task per chunk as the LLM stream emits sentences.
-        # Collect them in order at the end and concatenate the WAVs.
-        tts_tasks: list[asyncio.Task[bytes | None]] = []
-        full_text_parts: list[str] = []
-        first_chunk_at: datetime | None = None
+        async def _put(chunk: bytes | None) -> None:
+            if queue is not None:
+                await queue.put(chunk)
 
         try:
-            async for chunk in provider.stream_sentences(
-                customer_text,
-                history=history,
-                system_prompt=system_prompt,
-                model=model,
-                api_key=api_key,
-            ):
-                if not chunk.strip():
-                    continue
-                if first_chunk_at is None:
-                    first_chunk_at = datetime.now(timezone.utc)
-                    log.info(
-                        "[%s] first LLM chunk in %.2fs: '%s'",
-                        sid,
-                        (first_chunk_at - t0).total_seconds(),
-                        chunk[:60],
-                    )
-                full_text_parts.append(chunk)
-                tts_tasks.append(asyncio.create_task(
-                    tts_provider.synthesize(chunk, voice_id=voice_id)
-                ))
-        except Exception as exc:
-            log.error("[%s] LLM stream error: %s", sid, exc)
+            system_prompt = us.resolve_system_prompt()
+            # Inject the customer memory block (empty string if no prior
+            # context). Keeps the user's configured system prompt in the
+            # cacheable prefix position while the memory rides after.
+            if state and state.memory_context:
+                system_prompt = system_prompt + state.memory_context
 
-        # If the stream produced nothing (rare — usually a bad API key),
-        # fall back to one non-streaming completion so the call doesn't
-        # go silent.
-        if not full_text_parts:
-            log.warning("[%s] empty stream, falling back to non-streaming", sid)
+            voice_id = us.resolve_voice_id()
+            model = (
+                us.get("openai_model") if provider_name == "openai"
+                else us.get("groq_model")
+            )
+            api_key = us.get("openai_api_key") if provider_name == "openai" else None
+            provider = llm_registry.get(provider_name)
+
+            # ── Path A: non-streaming provider (Groq) ──────────────
+            if not isinstance(provider, OpenAIProvider):
+                try:
+                    raw_reply = await provider.complete(
+                        customer_text,
+                        history=history,
+                        system_prompt=system_prompt,
+                        model=model,
+                        api_key=api_key,
+                    )
+                except Exception as exc:
+                    log.error("[%s] LLM error: %s", sid, exc)
+                    raw_reply = "Sorry, I missed that — could you say that again?"
+
+                cleaned = clean_reply(raw_reply)
+                self._commit_reply_text(sid, user_id, cleaned.text, cleaned.hot_lead)
+                audio = await tts_provider.synthesize(cleaned.text, voice_id=voice_id)
+                await _put(audio)
+                t_total = (datetime.now(timezone.utc) - t0).total_seconds()
+                log.info("[%s] non-stream reply total %.2fs", sid, t_total)
+                return
+
+            # ── Path B: streaming provider (OpenAI) ─────────────────
+            # We spawn a TTS task per LLM sentence, then drain them IN
+            # ORDER and push into the audio queue as soon as each is
+            # ready. That preserves playback order while still letting
+            # sentence 2's TTS overlap with sentence 1 playing.
+            tts_tasks: list[asyncio.Task[bytes | None]] = []
+            full_text_parts: list[str] = []
+            first_chunk_at: datetime | None = None
+
+            async def _drain_ready_tts() -> None:
+                """Push any completed TTS chunks at the head of the queue.
+
+                We only push tasks from the FRONT of `tts_tasks` to keep
+                ordering correct. If task 0 isn't done yet, we can't push
+                task 1 even if it finished — otherwise the caller would
+                hear sentence 2 before sentence 1.
+                """
+                while tts_tasks and tts_tasks[0].done():
+                    task = tts_tasks.pop(0)
+                    try:
+                        audio_bytes = task.result()
+                    except Exception as exc:
+                        log.error("[%s] TTS chunk error: %s", sid, exc)
+                        audio_bytes = None
+                    if audio_bytes:
+                        await _put(audio_bytes)
+
             try:
-                raw = await provider.complete(
+                async for chunk in provider.stream_sentences(
                     customer_text,
                     history=history,
                     system_prompt=system_prompt,
                     model=model,
                     api_key=api_key,
-                )
+                ):
+                    if not chunk.strip():
+                        continue
+                    if first_chunk_at is None:
+                        first_chunk_at = datetime.now(timezone.utc)
+                        log.info(
+                            "[%s] first LLM chunk in %.2fs: '%s'",
+                            sid,
+                            (first_chunk_at - t0).total_seconds(),
+                            chunk[:60],
+                        )
+                    full_text_parts.append(chunk)
+                    tts_tasks.append(asyncio.create_task(
+                        tts_provider.synthesize(chunk, voice_id=voice_id)
+                    ))
+                    # Opportunistic drain — keeps latency-to-first-audio low
+                    # without waiting for the LLM to finish.
+                    await _drain_ready_tts()
             except Exception as exc:
-                log.error("[%s] fallback LLM error: %s", sid, exc)
-                raw = "Sorry, I missed that — could you say that again?"
-            cleaned = clean_reply(raw)
+                log.error("[%s] LLM stream error: %s", sid, exc)
+
+            # Fallback: stream produced nothing. Do one non-streaming
+            # completion so the call doesn't go silent.
+            if not full_text_parts:
+                log.warning("[%s] empty stream, falling back to non-streaming", sid)
+                try:
+                    raw = await provider.complete(
+                        customer_text,
+                        history=history,
+                        system_prompt=system_prompt,
+                        model=model,
+                        api_key=api_key,
+                    )
+                except Exception as exc:
+                    log.error("[%s] fallback LLM error: %s", sid, exc)
+                    raw = "Sorry, I missed that — could you say that again?"
+                cleaned = clean_reply(raw)
+                self._commit_reply_text(sid, user_id, cleaned.text, cleaned.hot_lead)
+                audio = await tts_provider.synthesize(cleaned.text, voice_id=voice_id)
+                await _put(audio)
+                return
+
+            # LLM done — now drain any remaining TTS tasks in order.
+            chunk_count = 0
+            for task in tts_tasks:
+                try:
+                    audio_bytes = await asyncio.wait_for(task, timeout=10.0)
+                except asyncio.TimeoutError:
+                    log.error("[%s] TTS chunk timed out", sid)
+                    audio_bytes = None
+                except Exception as exc:
+                    log.error("[%s] TTS chunk error: %s", sid, exc)
+                    audio_bytes = None
+                if audio_bytes:
+                    await _put(audio_bytes)
+                    chunk_count += 1
+
+            # Commit the full post-clean text (for end-call detection,
+            # DB, history). The chunks shipped to the caller already had
+            # [TAG] markers stripped; clean_reply on the joined text
+            # picks up end-phrase / hot-lead flags.
+            full_raw = " ".join(full_text_parts)
+            cleaned = clean_reply(full_raw)
             self._commit_reply_text(sid, user_id, cleaned.text, cleaned.hot_lead)
-            return await tts_provider.synthesize(cleaned.text, voice_id=voice_id)
 
-        # Clean the full text for DB + end-call detection. The streamed
-        # chunks already had [TAG] markers stripped, but end-phrase
-        # detection runs on the joined text.
-        full_raw = " ".join(full_text_parts)
-        cleaned = clean_reply(full_raw)
-        self._commit_reply_text(sid, user_id, cleaned.text, cleaned.hot_lead)
-
-        # Collect all TTS chunks (in order).
-        chunks: list[bytes] = []
-        for task in tts_tasks:
-            try:
-                result = await asyncio.wait_for(task, timeout=10.0)
-            except asyncio.TimeoutError:
-                log.error("[%s] TTS chunk timed out", sid)
-                result = None
-            except Exception as exc:
-                log.error("[%s] TTS chunk error: %s", sid, exc)
-                result = None
-            if result:
-                chunks.append(result)
-
-        if not chunks:
-            # Every TTS call failed — try one last synthesis of the full text.
-            log.warning("[%s] all streaming TTS failed, fallback synthesize", sid)
-            return await tts_provider.synthesize(cleaned.text, voice_id=voice_id)
-
-        merged = _concat_wavs(chunks)
-        t_total = (datetime.now(timezone.utc) - t0).total_seconds()
-        log.info(
-            "[%s] streamed reply: %d chunks, %d bytes, total %.2fs, end=%s hot=%s",
-            sid, len(chunks), len(merged), t_total,
-            cleaned.end_call, cleaned.hot_lead,
-        )
-        return merged
+            t_total = (datetime.now(timezone.utc) - t0).total_seconds()
+            log.info(
+                "[%s] streamed reply: %d chunks, total %.2fs, end=%s hot=%s",
+                sid, chunk_count, t_total,
+                cleaned.end_call, cleaned.hot_lead,
+            )
+        except Exception as exc:
+            log.error("[%s] producer crashed: %s", sid, exc)
+        finally:
+            # Always terminate the queue so the consumer exits.
+            await _put(None)
 
     def _commit_reply_text(
         self, sid: str, user_id: str, text: str, hot_lead: bool
@@ -517,31 +661,110 @@ class CallOrchestrator:
             _spawn(self._calls.update_by_sid(sid, hot_lead=True))
 
     # ── Serve reply audio ────────────────────────────────────
-    async def get_reply_audio(self, sid: str) -> bytes | None:
+    async def stream_reply_audio(self, sid: str) -> AsyncIterator[bytes] | None:
+        """Yield WAV bytes as they become available.
+
+        Returns None if the SID is unknown — caller should send a 404
+        in that case. Otherwise returns an async generator that:
+          1. Awaits the first WAV chunk (typically ~1 s after the
+             customer finished speaking).
+          2. Yields its full RIFF header + data body immediately.
+          3. For each subsequent chunk, yields only the PCM/mu-law body
+             (without a fresh RIFF header) so Twilio sees one continuous
+             stream of samples.
+
+        Twilio's <Play> tolerates this: the header at the start declares
+        a size field we write as "unknown / streaming" (0xFFFFFFFF) so
+        Twilio doesn't stop early when it hits the declared length.
+        """
         state = self._state.get(sid)
         if state is None:
             log.warning("[%s] reply-audio requested for unknown SID", sid)
             return None
 
-        task = state.reply_audio_task
-        state.reply_audio_task = None
-        pending = state.pending_text
+        queue = state.reply_audio_queue
+        # Consume the queue reference so a late retry doesn't re-drain.
+        state.reply_audio_queue = None
+        producer = state.producer_task
+        state.producer_task = None
 
-        if task is not None:
+        if queue is None:
+            # No producer was started for this SID — fall back to text.
+            return self._fallback_audio_generator(sid)
+
+        return self._wav_stream_generator(sid, queue, producer)
+
+    async def _wav_stream_generator(
+        self,
+        sid: str,
+        queue: asyncio.Queue[bytes | None],
+        producer: asyncio.Task[None] | None,
+    ) -> AsyncIterator[bytes]:
+        """Async generator that yields WAV bytes from the TTS queue.
+
+        See stream_reply_audio() for the overall design.
+        """
+        try:
+            # Await first chunk — this is the latency-defining await.
+            # If the producer is very slow, time out rather than hanging
+            # Twilio forever.
             try:
-                return await asyncio.wait_for(task, timeout=15.0)
+                first = await asyncio.wait_for(queue.get(), timeout=15.0)
             except asyncio.TimeoutError:
-                log.error("[%s] reply audio task timed out", sid)
-            except Exception as exc:
-                log.error("[%s] reply audio task error: %s", sid, exc)
+                log.error("[%s] timed out waiting for first audio chunk", sid)
+                return
 
-        user_id = state.user_id
-        us = await settings_service.for_user(user_id)
-        fallback_text = pending or "Thank you, have a great day!"
+            if first is None:
+                # Producer died before yielding anything.
+                log.warning("[%s] producer yielded no audio", sid)
+                return
+
+            # Yield the first chunk's header with an "unknown size" marker
+            # so Twilio doesn't stop at the declared data length.
+            # RIFF size field (bytes 4-7) and data-chunk size (4 bytes
+            # immediately after 'data') both get 0xFFFFFFFF.
+            header_bytes, body_bytes = _split_wav(first)
+            if header_bytes:
+                yield _rewrite_sizes_unknown(header_bytes)
+            if body_bytes:
+                yield body_bytes
+
+            # Subsequent chunks: strip the RIFF header, yield only audio body.
+            while True:
+                next_chunk = await queue.get()
+                if next_chunk is None:
+                    break
+                _h, b = _split_wav(next_chunk)
+                if b:
+                    yield b
+        finally:
+            # Ensure the producer task is awaited (prevents "never retrieved"
+            # warnings) and any lingering queue state is dropped.
+            if producer is not None and not producer.done():
+                try:
+                    await asyncio.wait_for(producer, timeout=2.0)
+                except Exception:
+                    producer.cancel()
+
+    async def _fallback_audio_generator(
+        self, sid: str
+    ) -> AsyncIterator[bytes]:
+        """Last-resort fallback when there's no producer queue.
+
+        Synthesises state.pending_text from scratch and yields the
+        whole WAV as a single chunk. Keeps the call from going silent.
+        """
+        state = self._state.get(sid)
+        if state is None:
+            return
+        us = await settings_service.for_user(state.user_id)
+        fallback_text = state.pending_text or "Thank you, have a great day!"
         log.warning("[%s] reply-audio fallback path taken", sid)
-        return await tts_provider.synthesize(
+        audio = await tts_provider.synthesize(
             fallback_text, voice_id=us.resolve_voice_id()
         )
+        if audio:
+            yield audio
 
     # ── Status + recording webhooks ──────────────────────────
     async def handle_call_status(
@@ -551,6 +774,9 @@ class CallOrchestrator:
 
         state = self._state.get(sid)
         transcript = ""
+        phone_for_memory = ""
+        user_id_for_memory = ""
+        openai_key = None
         if state is not None:
             us = await settings_service.for_user(state.user_id)
             agent = us.get("agent_name", "Agent")
@@ -559,11 +785,29 @@ class CallOrchestrator:
                 prefix = f"{agent} (AI)" if msg.get("role") == "assistant" else "Customer"
                 lines.append(f"{prefix}: {msg.get('content', '')}")
             transcript = "\n".join(lines)
+            phone_for_memory = state.phone
+            user_id_for_memory = state.user_id
+            openai_key = us.get("openai_api_key") or None
 
         if status in ("completed", "failed", "no-answer", "busy", "canceled"):
             _spawn(
                 self._calls.finalize_by_sid(sid, status, duration, "", "", transcript)
             )
+            # Kick off memory extraction in the background. Only worth doing
+            # when the call actually connected and had real exchanges —
+            # failed/no-answer calls have no transcript worth extracting.
+            if (
+                status == "completed"
+                and transcript.strip()
+                and phone_for_memory
+                and user_id_for_memory
+            ):
+                _spawn(memory_service.extract_and_save(
+                    user_id=user_id_for_memory,
+                    phone=phone_for_memory,
+                    transcript=transcript,
+                    api_key=openai_key,
+                ))
             self._state.discard(sid)
         elif status == "in-progress":
             _spawn(self._calls.update_by_sid(sid, status="answered"))

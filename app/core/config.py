@@ -130,12 +130,21 @@ class Settings(BaseSettings):
     groq_max_tokens: int = 100
 
     # ── OpenAI ────────────────────────────────────────────────
+    # gpt-4o is the production default — noticeably more natural and
+    # robust to off-script moments than gpt-4o-mini, which is the
+    # biggest lever for call quality. Users can still override per-user
+    # in the Settings page.
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o-mini"
-    openai_temperature: float = 0.3
-    openai_max_tokens: int = 100
+    openai_model: str = "gpt-4o"
+    # Higher temperature lets Sara sound conversational rather than
+    # reading scripted lines verbatim. 0.3 was fine for a rigid state
+    # machine; 0.7 is better for a persona.
+    openai_temperature: float = 0.7
+    # 180 leaves headroom for 2 sentences + any leading control tag
+    # without forcing the model to truncate mid-thought.
+    openai_max_tokens: int = 180
 
-    llm_provider: Literal["groq", "openai"] = "groq"
+    llm_provider: Literal["groq", "openai"] = "openai"
 
     # ── Cartesia ──────────────────────────────────────────────
     cartesia_api_key: str = ""
@@ -158,7 +167,7 @@ class Settings(BaseSettings):
 
     # ── Agent defaults (seed for new users) ──────────────────
     agent_name: str = "Sara"
-    agency_name: str = "Prestige Properties Dubai"
+    agency_name: str = "Dubai Luxury Cars"
 
     # ── Signup policy ────────────────────────────────────────
     # If false, only the first user can self-register; subsequent users

@@ -57,6 +57,31 @@ async def lifespan(app: FastAPI):
         await storage.ensure_bucket()
     except Exception as exc:
         log.error("Startup warning: %s", exc)
+
+    # Warm the outbound HTTP connections to OpenAI and Cartesia so that
+    # the *first* real call of the process doesn't pay a ~100–300 ms TLS
+    # handshake cost on the critical path. A cheap HEAD request opens
+    # the TLS session; subsequent POSTs reuse it via keepalive.
+    async def _warm() -> None:
+        from app.services.http_client import get_openai_client, get_cartesia_client
+        try:
+            await get_openai_client().head(
+                "https://api.openai.com/v1/models", timeout=5.0,
+            )
+        except Exception:
+            pass  # warming is best-effort
+        try:
+            await get_cartesia_client().head(
+                "https://api.cartesia.ai/", timeout=5.0,
+            )
+        except Exception:
+            pass
+    try:
+        import asyncio
+        asyncio.create_task(_warm())
+    except Exception:
+        pass
+
     yield
     try:
         await close_pool()
