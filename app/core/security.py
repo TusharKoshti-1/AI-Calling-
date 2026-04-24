@@ -9,6 +9,13 @@ Authentication dependencies:
   • `verify_twilio_signature` — HMAC-verify Twilio webhook bodies.
 
 Session cookies are opaque tokens; the DB is the source of truth.
+
+Sliding-session refresh:
+  When we successfully resolve a user from a session, we stash the raw
+  token + its DB expiry on `request.state`. A response middleware (see
+  `app.main`) then decides whether to bump the row's expiry and reissue
+  the cookie with a fresh Max-Age. Doing it here instead of inside the
+  dependency keeps read paths side-effect-free.
 """
 from __future__ import annotations
 
@@ -40,9 +47,17 @@ class AuthUser:
 # ═══════════════════════════════════════════════════════════════
 # Current-user resolution
 # ═══════════════════════════════════════════════════════════════
-async def _lookup_user_by_session(token: str | None, secret: str) -> AuthUser | None:
+async def _lookup_user_by_session(
+    token: str | None,
+    secret: str,
+    request: Request | None = None,
+) -> AuthUser | None:
     """Shared helper — returns AuthUser if the session is valid & live,
-    else None. Never raises; caller decides what to do with None."""
+    else None. Never raises; caller decides what to do with None.
+
+    When `request` is provided and resolution succeeds, the raw token
+    and session's current DB expiry are stored on `request.state` so
+    the sliding-refresh middleware can decide whether to extend."""
     if not token or not verify_token_shape(token, secret):
         return None
 
@@ -57,6 +72,11 @@ async def _lookup_user_by_session(token: str | None, secret: str) -> AuthUser | 
     user = await UsersRepository().get_by_id(row["user_id"])
     if user is None or not user.get("is_active", True):
         return None
+
+    if request is not None:
+        # Make info available to the sliding-refresh middleware.
+        request.state.session_token = token
+        request.state.session_expires_at = row["expires_at"]
 
     return AuthUser(
         id=str(user["id"]),
@@ -75,7 +95,7 @@ async def get_current_user(
     # Allow the cookie name to be overridden via settings; FastAPI's Cookie
     # binding is static so we fall back to manually reading the header.
     token = session_cookie or request.cookies.get(settings.session_cookie_name)
-    user = await _lookup_user_by_session(token, settings.session_secret)
+    user = await _lookup_user_by_session(token, settings.session_secret, request)
     if user is None:
         raise AuthError("Not authenticated.")
     return user
@@ -88,7 +108,7 @@ async def get_optional_user(
 ) -> AuthUser | None:
     """Like get_current_user, but returns None instead of raising."""
     token = session_cookie or request.cookies.get(settings.session_cookie_name)
-    return await _lookup_user_by_session(token, settings.session_secret)
+    return await _lookup_user_by_session(token, settings.session_secret, request)
 
 
 async def require_admin(

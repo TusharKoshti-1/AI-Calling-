@@ -37,22 +37,31 @@ _sessions = SessionsRepository()
 def _set_session_cookie(
     response: Response, token: str, settings: Settings
 ) -> None:
+    """Write the session cookie.
+
+    `effective_cookie_secure` auto-enables `Secure` in production so Render
+    (or any HTTPS deploy) gets safe cookies; locally over plain HTTP it
+    stays off so the cookie actually sticks.
+    """
     response.set_cookie(
         key=settings.session_cookie_name,
         value=token,
         max_age=settings.session_ttl_hours * 3600,
         httponly=True,
-        secure=settings.session_cookie_secure or settings.is_production,
+        secure=settings.effective_cookie_secure,
         samesite=settings.session_cookie_samesite,
         path="/",
     )
 
 
 def _clear_session_cookie(response: Response, settings: Settings) -> None:
+    # Match the attributes we set with, otherwise some browsers keep
+    # the old cookie around.
     response.delete_cookie(
         key=settings.session_cookie_name,
         path="/",
         httponly=True,
+        secure=settings.effective_cookie_secure,
         samesite=settings.session_cookie_samesite,
     )
 

@@ -1,7 +1,7 @@
 """
 app.db.repositories.sessions
 ────────────────────────────
-CRUD for the `sessions` table — signin, signout, cleanup.
+CRUD for the `sessions` table — signin, signout, sliding refresh, cleanup.
 """
 from __future__ import annotations
 
@@ -46,6 +46,26 @@ class SessionsRepository:
                 token_hash,
             )
             return dict(row) if row else None
+
+    async def extend(self, token_hash: str, new_expires_at: datetime) -> None:
+        """Sliding-session refresh — bump the row's expiry forward.
+
+        Only bumps forward (the GREATEST guard) so that a stale/racing
+        write can never *shorten* a session. We also require the row to
+        still be live; callers should already have checked that, but it's
+        cheap insurance.
+        """
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE sessions
+                SET expires_at = GREATEST(expires_at, $2)
+                WHERE token_hash = $1
+                  AND revoked_at IS NULL
+                """,
+                token_hash, new_expires_at,
+            )
 
     async def revoke(self, token_hash: str) -> None:
         pool = get_pool()

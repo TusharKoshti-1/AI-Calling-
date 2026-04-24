@@ -161,11 +161,20 @@ See `.env.example` for the full list. The SaaS-specific ones:
 
 | Var | Required? | Notes |
 |-----|-----------|-------|
-| `SESSION_SECRET` | **Yes in prod** | Long random string. Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. |
-| `SESSION_TTL_HOURS` | No | Default 720 (30 days). |
-| `SESSION_COOKIE_SECURE` | Recommended | `true` when behind HTTPS. |
+| `SESSION_SECRET` | **Yes in prod — app refuses to boot without it.** | Long random string, stable across deploys. Generate with `python -c "import secrets; print(secrets.token_urlsafe(48))"`. If this is unset or rotates, workers can't validate each other's cookies and every redeploy signs every user out. |
+| `SESSION_TTL_HOURS` | No | Default 720 (30 days). Sessions auto-extend on any authenticated request when they have less than `SESSION_REFRESH_WITHIN_HOURS` left, so active users effectively never expire. |
+| `SESSION_REFRESH_WITHIN_HOURS` | No | Default 168 (7 days). Sliding-refresh threshold. |
+| `SESSION_COOKIE_SECURE` | No | Auto-enabled in production. Override to `false` only for local HTTPS testing. |
+| `SESSION_COOKIE_SAMESITE` | No | `lax` (default) is correct for same-origin SaaS. |
 | `ALLOW_PUBLIC_SIGNUP` | No | `false` after first admin created to lock down signups. |
 | `VERIFY_TWILIO_SIGNATURE` | Recommended | `true` in production. |
+
+### Render deployment checklist
+
+1. Set **`SESSION_SECRET`** in your Render service → Environment → to a fixed random string (do NOT use "Generate value" every deploy).
+2. Set `APP_ENV=production` (already in the Dockerfile but you can override).
+3. Confirm your service URL is HTTPS — cookies are `Secure` in production.
+4. Redeploy. Existing sessions will be preserved across future redeploys as long as `SESSION_SECRET` is unchanged.
 
 ---
 
