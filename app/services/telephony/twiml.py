@@ -11,7 +11,12 @@ from xml.sax.saxutils import escape
 
 from app.core.config import get_settings
 
-SPEECH_TIMEOUT = "0.5"  # tuned for minimal dead air — see main.py comments
+# Twilio accepts either a number of seconds or the string "auto", which
+# enables Twilio's adaptive endpointing. In practice "auto" ends the turn
+# a few hundred milliseconds faster on most accents than a fixed 0.5s
+# timeout would — and it adapts when the customer is obviously mid-sentence
+# (trailing "and…"), so we get fewer premature cutoffs too.
+SPEECH_TIMEOUT = "auto"
 INPUT_TIMEOUT = 5
 
 

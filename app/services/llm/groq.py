@@ -3,13 +3,16 @@ app.services.llm.groq
 ─────────────────────
 Groq Chat Completions provider. Stateless — caller passes model and
 (optional) api_key per call.
+
+Uses the same shared httpx client as OpenAI for connection pooling; when
+users switch provider at runtime the cost is one fresh TLS handshake,
+not one per turn.
 """
 from __future__ import annotations
 
-import httpx
-
 from app.core.config import get_settings
 from app.core.logging import get_logger
+from app.services.http_client import get_openai_client  # reused: same transport shape
 
 log = get_logger(__name__)
 
@@ -52,8 +55,8 @@ class GroqProvider:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                resp = await client.post(GROQ_URL, headers=headers, json=payload)
+            client = get_openai_client()
+            resp = await client.post(GROQ_URL, headers=headers, json=payload)
             if resp.status_code == 200:
                 text = resp.json()["choices"][0]["message"]["content"]
                 log.info("Groq reply: %s", text[:100])

@@ -41,6 +41,7 @@ from app.core.exceptions import AppError
 from app.core.logging import configure_logging, get_logger
 from app.core.security import AuthUser, get_optional_user, session_expiry
 from app.db.session import close_pool, init_pool
+from app.services.http_client import close_all as close_http_clients
 from app.services.storage import storage
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -59,6 +60,10 @@ async def lifespan(app: FastAPI):
     yield
     try:
         await close_pool()
+    except Exception:
+        pass
+    try:
+        await close_http_clients()
     except Exception:
         pass
 
