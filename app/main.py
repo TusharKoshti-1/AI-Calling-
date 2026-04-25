@@ -187,6 +187,19 @@ def create_app() -> FastAPI:
         name="static",
     )
 
+    # Force-revalidate JS and CSS on every page load so users never
+    # get stuck with a cached version after we ship a fix. The
+    # versioned ?v=... query strings already do most of the work, but
+    # this is belt-and-braces against intermediate proxies / CDNs that
+    # might honour cache hints differently than expected.
+    @app.middleware("http")
+    async def _no_cache_on_static_assets(request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path
+        if path.startswith("/static/") and path.endswith((".js", ".css")):
+            response.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return response
+
     # ── Page routes ───────────────────────────────────────────
     def _page(filename: str) -> FileResponse:
         return FileResponse(str(_PAGES_DIR / filename))

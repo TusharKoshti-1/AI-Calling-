@@ -5,6 +5,12 @@
  * (hot-). Each caller tells us which DOM ids to read/write from.
  * ============================================================ */
 (function () {
+  // Visible in browser DevTools console — confirms the latest JS
+  // actually loaded. If you see anything OLDER than v8 here after a
+  // deploy, you're hitting a cache somewhere.
+  // eslint-disable-next-line no-console
+  console.log('[CallSara] calls-table.js v8 loaded — delete button enabled');
+
   const { api } = window.CallSaraAPI;
   const L = window.CallSaraLayout;
 
