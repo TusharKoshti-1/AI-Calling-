@@ -180,15 +180,18 @@ body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-s
 .hot-tog.on{background:var(--amber2);border-color:var(--amber);color:var(--amber)}
 
 /* ─── CALL TABLE ──────────────────────────────────────────── */
+/* Last column is the actions cell — it now holds View + Play + Delete
+   so we widened it from 90px to 140px. If that's still tight on small
+   screens, the cell uses flex with overflow-friendly buttons. */
 .tbl-head{
-  display:grid;grid-template-columns:140px 90px 110px 80px 70px 1fr 90px;
+  display:grid;grid-template-columns:140px 90px 110px 80px 70px 1fr 140px;
   gap:10px;padding:9px 18px;border-bottom:1px solid var(--b);
   font-size:9px;letter-spacing:1.5px;color:var(--t3);text-transform:uppercase;
   font-family:'DM Mono',monospace;
 }
 .tbl-body{min-height:100px}
 .trow{
-  display:grid;grid-template-columns:140px 90px 110px 80px 70px 1fr 90px;
+  display:grid;grid-template-columns:140px 90px 110px 80px 70px 1fr 140px;
   gap:10px;padding:11px 18px;border-bottom:1px solid var(--b);
   align-items:center;cursor:pointer;transition:background .1s;
 }
@@ -198,7 +201,7 @@ body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-s
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .cell-time{font-size:11px;color:var(--t3);font-family:'DM Mono',monospace}
 .cell-dur{font-family:'DM Mono',monospace;font-size:12px;color:var(--t2)}
-.cell-acts{display:flex;gap:5px;justify-content:flex-end}
+.cell-acts{display:flex;gap:5px;justify-content:flex-end;align-items:center;flex-wrap:nowrap}
 .tbl-empty{padding:50px 18px;text-align:center;color:var(--t3)}
 .tbl-empty svg{width:36px;height:36px;margin:0 auto 10px;display:block;opacity:.25}
 .tbl-empty p{font-size:13px}
