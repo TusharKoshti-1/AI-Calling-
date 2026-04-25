@@ -376,3 +376,39 @@ body{background:var(--bg);color:var(--t);font-family:'DM Sans',sans-serif;font-s
 .use-btn:hover{background:var(--gold3)}
 .use-btn.ub-active{background:var(--gold);color:#0b0e14;border-color:var(--gold)}
 
+
+/* ── Confirm modal (used by L.confirm) ───────────────────────── */
+.confirm-box{
+  background:var(--s);border:1px solid var(--b2);border-radius:var(--r3);
+  width:420px;max-width:92vw;padding:22px 22px 18px;
+  box-shadow:0 25px 70px rgba(0,0,0,.55);animation:su .22s ease;
+}
+.confirm-title{
+  font-family:'Playfair Display',serif;font-size:18px;font-weight:700;
+  color:var(--t);margin:0 0 8px;
+}
+.confirm-message{
+  font-size:13px;color:var(--t2);line-height:1.5;margin:0 0 18px;
+}
+.confirm-actions{
+  display:flex;justify-content:flex-end;gap:8px;
+}
+
+/* Solid (non-ghost) destructive button used inside the confirm modal. */
+.btn-danger.btn-sm{
+  background:var(--red);color:#fff;border-color:transparent;
+}
+.btn-danger.btn-sm:hover{background:#d04040}
+
+/* Trash icon button on each call row. Inherits btn-ghost sizing but
+   tints red on hover to make the destructive nature obvious. */
+.btn-del{
+  width:28px;height:28px;padding:0;display:inline-flex;align-items:center;
+  justify-content:center;border-radius:6px;border:1px solid var(--b2);
+  background:transparent;color:var(--t3);cursor:pointer;transition:all .12s;
+}
+.btn-del:hover{
+  background:rgba(240,96,96,.1);color:var(--red);border-color:rgba(240,96,96,.35);
+}
+.btn-del svg{width:13px;height:13px;display:block}
+.trow.row-deleting{opacity:.4;pointer-events:none;transition:opacity .25s}

@@ -242,6 +242,18 @@ class CallOrchestrator:
         self._messages = messages_repo or MessagesRepository()
         self._state = _CallStateStore()
 
+    def discard_state(self, sid: str) -> None:
+        """Drop any in-memory state for this SID.
+
+        Used by the delete endpoint: if a user deletes a call that's
+        somehow still active in memory (e.g. they hit delete from one
+        browser tab while a call is mid-conversation in another), we
+        evict the state so any further webhook hits for that SID get
+        a clean "unknown SID" response and hang up rather than leaking
+        a dangling conversation.
+        """
+        self._state.discard(sid)
+
     # ── Lifecycle ─────────────────────────────────────────────
     async def register_outbound(
         self, sid: str, user_id: str, phone: str

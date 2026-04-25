@@ -175,11 +175,15 @@
     const hot = c.hot_lead;
     const hasTx = c.transcript && c.transcript.trim().length > 0;
 
-    const d = JSON.stringify({
+    const d = _attrEsc(JSON.stringify({
       sid: c.sid, phone: c.phone || '', hot,
       dur: c.duration_sec || 0, started: c.started_at || '',
       rec: c.recording_url || '',
-    }).replace(/"/g, '&quot;');
+      id: c.id || '',
+    }));
+    const delPayload = _attrEsc(JSON.stringify({
+      id: c.id || '', sid: c.sid, phone: c.phone || c.sid,
+    }));
 
     return `<div class="trow ${hot ? 'hot-row' : ''}" data-sid="${esc(c.sid)}" data-hash="${hashStr(c.sid + c.status + c.duration_sec + c.hot_lead + c.recording_url)}" onclick="openModal(${d})">
       <div class="cell-phone">${hot ? '🔥 ' : ''}${esc(c.phone || c.sid)}</div>
@@ -191,6 +195,9 @@
       <div class="cell-acts">
         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openModal(${d})">View</button>
         ${c.recording_url ? `<a class="btn btn-outline btn-sm" href="${esc(c.recording_url)}" target="_blank" onclick="event.stopPropagation()">▶</a>` : ''}
+        <button class="btn-del" title="Delete call" onclick="event.stopPropagation();deleteCall(${delPayload})">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 012-2h2a2 2 0 012 2v2"/></svg>
+        </button>
       </div>
     </div>`;
   }
@@ -323,9 +330,15 @@
     await loadTableData('db');
   }
 
+  // The call currently displayed in the detail modal — captured here
+  // so the modal's Delete button knows which row to remove without
+  // having to read it back from the DOM.
+  let _activeModalCall = null;
+
   // ── MODAL ───────────────────────────────────────────────────
   function openModal(data) {
     if (typeof data === 'string') data = JSON.parse(data);
+    _activeModalCall = data;
     const { sid, phone, hot, dur, started, rec } = data;
     const phoneEl = document.getElementById('m-phone');
     const metaEl = document.getElementById('m-meta');
@@ -341,7 +354,32 @@
     }
     if (bodyEl) bodyEl.innerHTML = '<div class="loading-t">Loading transcript...</div>';
     document.getElementById('detailOverlay')?.classList.add('open');
+    // Wire up the modal's Delete button — created lazily once and
+    // cleared between modal opens so it always points at the right call.
+    _ensureModalDeleteBtn();
     loadMessages(sid, rec);
+  }
+
+  function _ensureModalDeleteBtn() {
+    // The modal is rendered statically in the HTML and doesn't have a
+    // delete button by default, so we inject one into the modal header
+    // (next to the existing close X) on first open.
+    const hd = document.querySelector('#detailOverlay .modal-hd');
+    if (!hd) return;
+    if (hd.querySelector('.modal-del-btn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-danger btn-sm modal-del-btn';
+    btn.style.marginRight = '8px';
+    btn.title = 'Delete this call';
+    btn.innerHTML = '🗑 Delete';
+    btn.onclick = (e) => {
+      e.stopPropagation();
+      if (_activeModalCall) deleteCall(_activeModalCall);
+    };
+    // Insert before the close X.
+    const closeX = hd.querySelector('#modal-close, .close-x');
+    if (closeX) hd.insertBefore(btn, closeX);
+    else hd.appendChild(btn);
   }
 
   async function loadMessages(sid, rec) {
@@ -384,6 +422,61 @@
     if (!e || e.target === document.getElementById('detailOverlay')) {
       document.getElementById('detailOverlay')?.classList.remove('open');
     }
+  }
+
+  /**
+   * Delete a call. Used by the row-level trash icon and the modal-level
+   * Delete button. Mirrors CallSaraTable.deleteRow so the dashboard
+   * (legacy app.js) and Calls/Hot pages (calls-table.js) behave the same.
+   */
+  async function deleteCall(payload) {
+    if (typeof payload === 'string') payload = JSON.parse(payload);
+    if (!payload || !payload.id) {
+      toast('Cannot delete: missing call id', 'err');
+      return;
+    }
+
+    // Use the shared layout confirm if present; otherwise fall back
+    // to native confirm() so this works even if layout.js failed to
+    // load for any reason.
+    let ok = false;
+    if (window.CallSaraLayout && typeof window.CallSaraLayout.confirm === 'function') {
+      ok = await window.CallSaraLayout.confirm({
+        title: 'Delete this call?',
+        message:
+          `This permanently deletes the call to ${payload.phone || payload.sid}, ` +
+          `including its transcript and recording. This cannot be undone.`,
+        confirmText: 'Delete',
+        danger: true,
+      });
+    } else {
+      ok = confirm(`Delete call to ${payload.phone || payload.sid}?\nThis cannot be undone.`);
+    }
+    if (!ok) return;
+
+    document.querySelectorAll(`.trow[data-sid="${payload.sid}"]`)
+      .forEach((r) => r.classList.add('row-deleting'));
+
+    try {
+      await api(`/api/calls/${encodeURIComponent(payload.id)}`, 'DELETE');
+      toast('✓ Call deleted', 'ok');
+    } catch (err) {
+      document.querySelectorAll(`.trow[data-sid="${payload.sid}"]`)
+        .forEach((r) => r.classList.remove('row-deleting'));
+      toast('✗ Delete failed', 'err');
+      return;
+    }
+
+    // Close the modal if this delete came from inside it.
+    closeModal();
+
+    // Refresh whichever views are visible. This page uses two named
+    // tables (dashboard + all-calls) backed by the same loadTableData,
+    // and a hot-leads widget. Reload them all.
+    try { await loadTableData('db'); } catch (_) {}
+    try { await loadTableData('cl'); } catch (_) {}
+    try { await loadHotWidget(); } catch (_) {}
+    try { await loadStats(); } catch (_) {}
   }
 
   // ── SETTINGS PAGE ───────────────────────────────────────────
@@ -519,6 +612,12 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#x27;');
   }
+  // Used to safely embed a JSON string inside a double-quoted HTML
+  // attribute. We only escape & and " — escaping < or > would corrupt
+  // legitimate JSON content and isn't needed inside an attribute.
+  function _attrEsc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  }
   function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
   function hashStr(s) {
     let h = 0;
@@ -553,6 +652,7 @@
   window.bulkCall = bulkCall;
   window.openModal = openModal;
   window.closeModal = closeModal;
+  window.deleteCall = deleteCall;
   window.loadSettings = loadSettings;
   window.selectLLM = selectLLM;
   window.saveLLMSettings = saveLLMSettings;

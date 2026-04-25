@@ -98,6 +98,36 @@ class CallsRepository:
                 sid, recording_url, recording_path,
             )
 
+    async def delete_by_id(
+        self, call_id: str, user_id: str
+    ) -> dict[str, str] | None:
+        """Delete a call row, scoped to the owning user.
+
+        Returns a dict with `sid` and `recording_path` of the deleted row
+        so the caller can clean up the recording file in object storage,
+        or None if no row matched (call doesn't exist OR belongs to a
+        different user — same response either way to avoid leaking the
+        existence of other tenants' calls).
+
+        Tenant safety: the WHERE clause requires BOTH the id and user_id.
+        If user A tries to delete user B's call by guessing the id, the
+        DELETE just affects 0 rows and we return None.
+
+        Cascade: messages.call_id has ON DELETE CASCADE in the schema, so
+        the transcript rows go automatically — no second query needed.
+        """
+        pool = get_pool()
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                """
+                DELETE FROM calls
+                WHERE id = $1::uuid AND user_id = $2::uuid
+                RETURNING sid, COALESCE(recording_path, '') AS recording_path
+                """,
+                call_id, user_id,
+            )
+            return dict(row) if row else None
+
     # ── Reads — always user-scoped ────────────────────────────
     async def get_user_for_sid(self, sid: str) -> str | None:
         """Look up which user owns a given call SID (used by webhooks)."""

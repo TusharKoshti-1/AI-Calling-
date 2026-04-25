@@ -6,8 +6,13 @@
   const { api } = window.CallSaraAPI;
   const L = window.CallSaraLayout;
 
+  // Track which call is currently displayed so the Delete button can
+  // act on it without re-reading anything from the DOM.
+  let _activeCall = null;
+
   function open(data) {
     if (typeof data === 'string') data = JSON.parse(data);
+    _activeCall = data;
     const { sid, phone, hot, dur, started, rec } = data;
     const phoneEl = document.getElementById('m-phone');
     const metaEl  = document.getElementById('m-meta');
@@ -26,7 +31,37 @@
     }
     if (bodyEl) bodyEl.innerHTML = '<div class="loading-t">Loading transcript...</div>';
     overlay.classList.add('open');
+    _ensureDeleteBtn();
     loadMessages(sid, rec);
+  }
+
+  /**
+   * Inject a Delete button into the modal header on first open.
+   * The handler reads `_activeCall` so the button always targets
+   * whichever call is currently shown.
+   */
+  function _ensureDeleteBtn() {
+    const hd = document.querySelector('#detailOverlay .modal-hd');
+    if (!hd || hd.querySelector('.modal-del-btn')) return;
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-danger btn-sm modal-del-btn';
+    btn.style.marginRight = '8px';
+    btn.title = 'Delete this call';
+    btn.innerHTML = '🗑 Delete';
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!_activeCall) return;
+      if (!window.CallSaraTable || !window.CallSaraTable.deleteRow) return;
+      const ok = await window.CallSaraTable.deleteRow({
+        id: _activeCall.id || '',
+        sid: _activeCall.sid,
+        phone: _activeCall.phone || _activeCall.sid,
+      });
+      if (ok) close();
+    });
+    const closeX = hd.querySelector('#modal-close, .close-x');
+    if (closeX) hd.insertBefore(btn, closeX);
+    else hd.appendChild(btn);
   }
 
   async function loadMessages(sid, rec) {

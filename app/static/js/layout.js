@@ -176,8 +176,100 @@
     agentName: 'Sara',
     fromNumber: '',
     agencyName: '',
-    toast, esc, fmtDur, fmtDate, badgeClass,
+    toast, esc, fmtDur, fmtDate, badgeClass, confirm: showConfirm,
   };
+
+  // ── Confirm modal ─────────────────────────────────────────────
+  // A reusable in-app confirmation dialog. Injected once on first use
+  // so pages don't need to add markup. Resolves a promise with true/false
+  // when the user clicks Confirm or Cancel (or hits Escape / clicks the
+  // backdrop, both of which count as cancel).
+  //
+  // Usage:
+  //   const ok = await L.confirm({
+  //     title: 'Delete call?',
+  //     message: 'This permanently deletes the call, transcript, and recording.',
+  //     confirmText: 'Delete',
+  //     danger: true,
+  //   });
+  //   if (ok) { ... }
+  let _confirmDom = null;
+  let _activeResolver = null;
+
+  function _ensureConfirmDom() {
+    if (_confirmDom) return _confirmDom;
+    const wrap = document.createElement('div');
+    wrap.id = 'confirmOverlay';
+    wrap.className = 'overlay';
+    // Inline a tiny bit of layout-only style (no design opinions) so this
+    // works even on pages that don't pull in extra CSS. Colours come from
+    // the existing theme variables.
+    wrap.innerHTML = `
+      <div class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="confirmTitle">
+        <h3 id="confirmTitle" class="confirm-title">Are you sure?</h3>
+        <p id="confirmMessage" class="confirm-message"></p>
+        <div class="confirm-actions">
+          <button id="confirmCancelBtn" class="btn btn-ghost btn-sm">Cancel</button>
+          <button id="confirmOkBtn" class="btn btn-sm">Confirm</button>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap);
+
+    // Wire up handlers (once, here, so each call doesn't re-bind).
+    const close = (result) => {
+      wrap.classList.remove('open');
+      if (_activeResolver) {
+        const r = _activeResolver;
+        _activeResolver = null;
+        r(result);
+      }
+    };
+    wrap.addEventListener('click', (e) => {
+      if (e.target === wrap) close(false);
+    });
+    wrap.querySelector('#confirmCancelBtn').addEventListener('click', () => close(false));
+    wrap.querySelector('#confirmOkBtn').addEventListener('click', () => close(true));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && wrap.classList.contains('open')) close(false);
+      if (e.key === 'Enter' && wrap.classList.contains('open')) close(true);
+    });
+
+    _confirmDom = wrap;
+    return wrap;
+  }
+
+  function showConfirm(opts) {
+    opts = opts || {};
+    const wrap = _ensureConfirmDom();
+    const titleEl = wrap.querySelector('#confirmTitle');
+    const msgEl   = wrap.querySelector('#confirmMessage');
+    const okBtn   = wrap.querySelector('#confirmOkBtn');
+
+    titleEl.textContent = opts.title || 'Are you sure?';
+    msgEl.textContent   = opts.message || '';
+    okBtn.textContent   = opts.confirmText || 'Confirm';
+    // Danger styling for destructive actions like Delete.
+    okBtn.className = opts.danger
+      ? 'btn btn-danger btn-sm'
+      : 'btn btn-gold btn-sm';
+
+    // If a previous confirm is somehow still open with an unresolved
+    // promise, resolve it as cancel so we don't strand any callers.
+    if (_activeResolver) {
+      const r = _activeResolver;
+      _activeResolver = null;
+      r(false);
+    }
+
+    return new Promise((resolve) => {
+      _activeResolver = resolve;
+      wrap.classList.add('open');
+      // Focus cancel by default — destructive actions should NOT be
+      // accidentally triggerable just by hitting Enter on a focused
+      // confirm button. Users can still hit Enter to confirm.
+      setTimeout(() => wrap.querySelector('#confirmCancelBtn')?.focus(), 0);
+    });
+  }
 
   document.addEventListener('DOMContentLoaded', () => {
     const page = window.CALLSARA_PAGE || '';
@@ -185,5 +277,6 @@
     renderTopbar(page);
     loadStatus();
     document.getElementById('signoutBtn')?.addEventListener('click', signout);
+    _ensureConfirmDom();
   });
 })();

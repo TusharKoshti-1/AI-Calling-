@@ -6,9 +6,11 @@ User-scoped: every call here resolves the signed-in user via the
 """
 from __future__ import annotations
 
+import asyncio
+import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.logging import get_logger
 from app.core.security import AuthUser, get_current_user
@@ -16,6 +18,7 @@ from app.db.repositories.calls import CallsRepository
 from app.db.repositories.messages import MessagesRepository
 from app.schemas.calls import DialRequest, DialResponse
 from app.services.call_orchestrator import call_orchestrator
+from app.services.storage import storage
 from app.services.telephony import twilio_client
 
 log = get_logger(__name__)
@@ -110,3 +113,72 @@ async def api_call(
         sid=result.sid, user_id=user.id, phone=result.phone,
     )
     return DialResponse(success=True, sid=result.sid)
+
+
+@router.delete("/api/calls/{call_id}")
+async def api_delete_call(
+    call_id: str,
+    user: Annotated[AuthUser, Depends(get_current_user)],
+) -> dict:
+    """Permanently delete a call and everything attached to it.
+
+    Cleanup performed:
+      1. DB row in `calls` (the WHERE clause is scoped by user_id, so
+         users can only delete their own calls — see CallsRepository).
+      2. All `messages` rows for the call — happens automatically via
+         the ON DELETE CASCADE on messages.call_id.
+      3. The recording audio file in Supabase Storage, if any.
+      4. Any in-memory CallState (in case the call is still active in
+         this worker) — prevents a dangling conversation if a user
+         deletes a call that's mid-flight in another tab.
+
+    The DB delete is awaited (so the user gets an accurate response
+    about whether anything was actually removed). The storage delete
+    is fire-and-forget — its outcome doesn't change what the dashboard
+    shows, and we don't want to make the user wait on object storage
+    when the row is already gone.
+    """
+    # Validate UUID shape before touching the DB. asyncpg would raise
+    # a DataError on non-UUID input which we'd catch as 500 — but a
+    # malformed id from the frontend is really a "not found" case
+    # from the user's perspective, so we surface it as 404.
+    try:
+        uuid.UUID(call_id)
+    except (ValueError, AttributeError, TypeError):
+        raise HTTPException(status_code=404, detail="call not found") from None
+
+    try:
+        deleted = await _calls.delete_by_id(call_id, user.id)
+    except Exception as exc:
+        log.error("Delete call %s failed: %s", call_id, exc)
+        raise HTTPException(status_code=500, detail="delete failed") from exc
+
+    if deleted is None:
+        # Either the id doesn't exist OR it belongs to another user.
+        # Same response either way — never leak the existence of other
+        # tenants' calls via differential 404 vs 403.
+        raise HTTPException(status_code=404, detail="call not found")
+
+    # Drop in-memory state for this SID so any straggling webhooks
+    # don't try to keep talking to a deleted call.
+    sid = deleted.get("sid", "")
+    if sid:
+        try:
+            call_orchestrator.discard_state(sid)
+        except Exception as exc:
+            log.warning("discard_state(%s) failed: %s", sid, exc)
+
+    # Fire off the storage cleanup without blocking the response.
+    rec_path = (deleted.get("recording_path") or "").strip()
+    if rec_path:
+        async def _cleanup() -> None:
+            try:
+                await storage.delete_recording(rec_path)
+            except Exception as exc:
+                # Already logged inside delete_recording; this is a
+                # belt-and-braces guard so the task can never crash
+                # the event loop.
+                log.error("Recording cleanup task failed: %s", exc)
+        asyncio.create_task(_cleanup())
+
+    return {"success": True, "sid": sid}

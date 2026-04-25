@@ -119,5 +119,48 @@ class SupabaseStorage:
                 return resp.json().get("signedURL", "")
         return ""
 
+    async def delete_recording(self, path: str) -> bool:
+        """Delete a recording object from the bucket.
+
+        Idempotent and forgiving:
+          • Empty path → no-op, returns True.
+          • Supabase not configured → no-op, returns True.
+          • File not found (404) → treated as success (already gone).
+          • Network/storage error → returns False; caller logs it but
+            the call row will already be deleted from the DB by then,
+            so an orphaned object is the worst case.
+
+        Why we tolerate failures rather than throwing:
+        the user clicked "delete" and the DB row is the source of truth
+        for what they see. A storage cleanup hiccup shouldn't surface as
+        an error in their face — we'd rather succeed loudly and reconcile
+        orphaned files later if needed.
+        """
+        if not path:
+            return True
+        s = get_settings()
+        if not s.supabase_service_key or not s.supabase_url:
+            log.warning("Supabase not configured — skipping storage delete.")
+            return True
+
+        url = f"{self._base_url()}/object/{s.supabase_bucket}/{path}"
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.delete(url, headers=self._headers())
+            if resp.status_code in (200, 204):
+                log.info("✅ Recording deleted: %s", path)
+                return True
+            if resp.status_code == 404:
+                log.info("Recording already missing in storage: %s", path)
+                return True
+            log.error(
+                "Storage delete failed (%s): %s — %s",
+                path, resp.status_code, resp.text[:300],
+            )
+            return False
+        except Exception as exc:
+            log.error("Recording delete error for %s: %s", path, exc)
+            return False
+
 
 storage = SupabaseStorage()
