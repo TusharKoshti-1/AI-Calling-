@@ -3,8 +3,11 @@ app.services.text_cleaner
 ─────────────────────────
 Normalises raw LLM output for TTS and extracts control tags:
 
-    [HOT_LEAD]   → mark the call as a hot lead
-    [END_CALL]   → hang up after this turn
+    [HOT_LEAD]      → mark the call as a hot lead
+    [END_CALL]      → hang up after this turn
+    [TRANSFER_CALL] → after this turn, dial the user's configured
+                      transfer_number; if no answer, fall back to a
+                      polite "experts are busy" line and end the call
 
 Bug fix vs. the legacy version:
     The old END_PHRASES matcher used a plain substring check, so "take care"
@@ -47,6 +50,7 @@ _NON_ASCII_PHRASES: list[str] = [
 
 _TAG_END = re.compile(r"\[END_CALL\]", re.IGNORECASE)
 _TAG_HOT = re.compile(r"\[HOT_LEAD\]", re.IGNORECASE)
+_TAG_TRANSFER = re.compile(r"\[TRANSFER_CALL\]", re.IGNORECASE)
 _THINK_BLOCK = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
 _BOLD = re.compile(r"\*\*(.*?)\*\*")
 _ITALIC = re.compile(r"\*(.*?)\*")
@@ -61,20 +65,29 @@ class CleanedReply:
     text: str
     end_call: bool
     hot_lead: bool
+    transfer_call: bool = False
 
 
 def clean_reply(raw: str) -> CleanedReply:
-    """Strip control tags + markdown, detect end-of-call and hot-lead signals."""
+    """Strip control tags + markdown, detect end-of-call, hot-lead, and transfer signals."""
     text = raw or "Thank you, have a great day!"
 
     end_call = bool(_TAG_END.search(text))
     hot_lead = bool(_TAG_HOT.search(text))
+    transfer_call = bool(_TAG_TRANSFER.search(text))
     if hot_lead:
         end_call = True  # Hot leads always end the call.
+    if transfer_call:
+        # When transferring we DON'T want the orchestrator to also hang up
+        # before the dial happens — the transfer flow handles its own
+        # cleanup. So clear end_call here even if the model also emitted
+        # [END_CALL] alongside [TRANSFER_CALL].
+        end_call = False
 
     # Strip tags + markdown + emoji
     text = _TAG_END.sub("", text)
     text = _TAG_HOT.sub("", text)
+    text = _TAG_TRANSFER.sub("", text)
     text = _THINK_BLOCK.sub("", text)
     text = _BOLD.sub(r"\1", text)
     text = _ITALIC.sub(r"\1", text)
@@ -84,7 +97,8 @@ def clean_reply(raw: str) -> CleanedReply:
     text = _WS.sub(" ", text).strip()
 
     # Post-hoc end-phrase detection if no explicit [END_CALL] tag.
-    if not end_call:
+    # Only check this when not transferring — transfer has its own audio.
+    if not end_call and not transfer_call:
         lowered = text.lower()
         if any(p.search(lowered) for p in _ASCII_PATTERNS):
             end_call = True
@@ -99,4 +113,9 @@ def clean_reply(raw: str) -> CleanedReply:
             .replace('"', "'")
     )
 
-    return CleanedReply(text=text, end_call=end_call, hot_lead=hot_lead)
+    return CleanedReply(
+        text=text,
+        end_call=end_call,
+        hot_lead=hot_lead,
+        transfer_call=transfer_call,
+    )

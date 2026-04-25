@@ -10,6 +10,7 @@
       const s = await api('/api/settings');
       setVal('s-agent-name',    s.agent_name);
       setVal('s-agency-name',   s.agency_name);
+      setVal('s-transfer-number', s.transfer_number);
       setVal('s-system-prompt', s.system_prompt);
       const provider = (s.llm_provider || 'openai').toLowerCase();
       setLLMButtons(provider);
@@ -63,6 +64,7 @@
     const body = {
       agent_name:  document.getElementById('s-agent-name').value.trim(),
       agency_name: document.getElementById('s-agency-name').value.trim(),
+      transfer_number: document.getElementById('s-transfer-number').value.trim(),
     };
     try {
       const d = await api('/api/settings', 'POST', body);

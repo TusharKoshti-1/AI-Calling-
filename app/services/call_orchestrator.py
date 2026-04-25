@@ -60,7 +60,7 @@ from app.services.memory_service import memory_service
 from app.services.settings_service import UserSettings, settings_service
 from app.services.storage import storage
 from app.services.telephony import twiml
-from app.services.text_cleaner import clean_reply
+from app.services.text_cleaner import CleanedReply, clean_reply
 from app.services.tts import tts_provider
 
 log = get_logger(__name__)
@@ -103,6 +103,18 @@ class CallState:
     reply_audio_queue: asyncio.Queue[bytes | None] | None = None
     producer_task: asyncio.Task[None] | None = None
     pending_text: str = ""
+
+    # Post-reply control flags. The producer sets these when it detects
+    # an [END_CALL] or [TRANSFER_CALL] tag in the streamed LLM output.
+    # /post-reply-action reads them after the reply audio finishes
+    # playing and decides hangup / transfer / continue.
+    #
+    # We use a separate post-play webhook (rather than embedding the
+    # decision in /process-speech) so the call ends correctly even if
+    # the customer doesn't speak again — which is the whole point of
+    # [END_CALL].
+    pending_hangup: bool = False
+    pending_transfer: bool = False
 
 
 class _CallStateStore:
@@ -240,9 +252,12 @@ class CallOrchestrator:
     ) -> None:
         """Record a call we just placed via Twilio.
 
-        Also loads any prior customer_memory for this phone and attaches
-        it to the call state so every subsequent LLM call this turn sees
-        the context block.
+        Loads any prior customer_memory for this phone synchronously —
+        the greeting webhook fires within seconds of this call returning,
+        so memory MUST be in place before then. Earlier versions used
+        _spawn() here, which created a race: on slow DB days the greeting
+        would fire with empty memory and the AI would re-introduce itself
+        to a returning customer.
         """
         state = CallState(
             sid=sid,
@@ -253,18 +268,20 @@ class CallOrchestrator:
         self._state.put(state)
         us = await settings_service.for_user(user_id)
 
-        # Load prior memory (if any) — runs in parallel with the DB upsert
-        # so we don't serialise the two network calls.
-        async def _load_memory() -> None:
+        # Awaited (not spawned) — the few-hundred-ms cost happens during
+        # Twilio's dial time anyway, so it's hidden latency.
+        try:
             state.memory_context = await memory_service.load_context_block(
                 user_id, phone,
             )
             if state.memory_context:
                 log.info("[%s] loaded memory context for %s", sid, phone)
+        except Exception as exc:
+            log.error("[%s] memory load failed: %s", sid, exc)
 
-        _spawn(_load_memory())
+        # Bump call count + DB row in the background — these are
+        # write-side, not read-on-greeting, so they're safe to defer.
         _spawn(memory_service.record_call_start(user_id, phone))
-
         _spawn(
             self._calls.upsert(sid, user_id, {
                 "phone": phone,
@@ -537,7 +554,7 @@ class CallOrchestrator:
                     raw_reply = "Sorry, I missed that — could you say that again?"
 
                 cleaned = clean_reply(raw_reply)
-                self._commit_reply_text(sid, user_id, cleaned.text, cleaned.hot_lead)
+                self._commit_reply_text(sid, user_id, cleaned)
                 audio = await tts_provider.synthesize(cleaned.text, voice_id=voice_id)
                 await _put(audio)
                 t_total = (datetime.now(timezone.utc) - t0).total_seconds()
@@ -615,7 +632,7 @@ class CallOrchestrator:
                     log.error("[%s] fallback LLM error: %s", sid, exc)
                     raw = "Sorry, I missed that — could you say that again?"
                 cleaned = clean_reply(raw)
-                self._commit_reply_text(sid, user_id, cleaned.text, cleaned.hot_lead)
+                self._commit_reply_text(sid, user_id, cleaned)
                 audio = await tts_provider.synthesize(cleaned.text, voice_id=voice_id)
                 await _put(audio)
                 return
@@ -641,7 +658,7 @@ class CallOrchestrator:
             # picks up end-phrase / hot-lead flags.
             full_raw = " ".join(full_text_parts)
             cleaned = clean_reply(full_raw)
-            self._commit_reply_text(sid, user_id, cleaned.text, cleaned.hot_lead)
+            self._commit_reply_text(sid, user_id, cleaned)
 
             t_total = (datetime.now(timezone.utc) - t0).total_seconds()
             log.info(
@@ -656,18 +673,139 @@ class CallOrchestrator:
             await _put(None)
 
     def _commit_reply_text(
-        self, sid: str, user_id: str, text: str, hot_lead: bool
+        self, sid: str, user_id: str, cleaned: "CleanedReply"
     ) -> None:
-        """Persist the AI's reply text to in-memory history + DB. Fire-and-forget."""
+        """Persist reply text + set post-play control flags.
+
+        Called from both streaming and non-streaming paths after
+        clean_reply() has parsed the LLM output. The cleaned object's
+        flags determine whether /post-reply-action will continue
+        listening, hang up, or transfer.
+        """
         state = self._state.get(sid)
         if state is not None:
-            state.history.append({"role": "assistant", "content": text})
-            state.pending_text = text
+            state.history.append({"role": "assistant", "content": cleaned.text})
+            state.pending_text = cleaned.text
+            # Set the control flags exactly once per turn. Producer
+            # writes them; /post-reply-action reads + clears them.
+            if cleaned.transfer_call:
+                state.pending_transfer = True
+            elif cleaned.end_call:
+                state.pending_hangup = True
         _spawn(self._messages.insert(
-            call_sid=sid, user_id=user_id, role="ai", content=text,
+            call_sid=sid, user_id=user_id, role="ai", content=cleaned.text,
         ))
-        if hot_lead:
+        if cleaned.hot_lead:
             _spawn(self._calls.update_by_sid(sid, hot_lead=True))
+
+    # ── Post-reply branching (the call-ending fix) ───────────
+    async def handle_post_reply_action(self, sid: str) -> str:
+        """Decide what Twilio should do after the AI's reply audio finishes.
+
+        Three possible outcomes:
+          • pending_hangup   → return <Hangup/> so the call ends.
+          • pending_transfer → dial the user's transfer_number; if the
+                               dial fails or no one picks up, Twilio
+                               falls through to /transfer-status which
+                               plays a polite fallback line and hangs up.
+          • neither flag set → resume listening for the next utterance.
+
+        Flags are cleared after read so a stale state can't end the call
+        on the next turn by accident.
+        """
+        state = self._state.get(sid)
+        if state is None:
+            # Unknown SID — safest is to hang up rather than loop forever.
+            log.warning("[%s] post-reply-action for unknown SID — hanging up", sid)
+            return twiml.hangup()
+
+        # Read + clear in one step. If we crash mid-way the worst case is
+        # a redundant continue-listening, not a stuck call.
+        hangup_now = state.pending_hangup
+        transfer_now = state.pending_transfer
+        state.pending_hangup = False
+        state.pending_transfer = False
+
+        if transfer_now:
+            us = await settings_service.for_user(state.user_id)
+            transfer_number = (us.get("transfer_number") or "").strip()
+            if not transfer_number:
+                log.warning(
+                    "[%s] [TRANSFER_CALL] but no transfer_number configured — "
+                    "ending call gracefully", sid,
+                )
+                return twiml.hangup()
+            log.info("[%s] transferring to %s", sid, transfer_number)
+            return twiml.transfer_call(transfer_number, sid)
+
+        if hangup_now:
+            log.info("[%s] ending call (end_call flag was set)", sid)
+            return twiml.hangup()
+
+        # No control flag — resume the conversation.
+        return twiml.listen_for_speech()
+
+    # ── Transfer status callback ─────────────────────────────
+    async def handle_transfer_status(
+        self, sid: str, dial_call_status: str
+    ) -> str:
+        """Called by Twilio after the <Dial> finishes.
+
+        Twilio sets DialCallStatus to one of:
+          completed           — the transferee picked up and the bridged
+                                call ended normally. Nothing more to do.
+          answered            — same as completed on some accounts.
+          no-answer / busy /
+          failed / canceled   — nobody picked up. We play a polite
+                                "experts are busy" line and hang up.
+
+        The behaviour you asked for: when the transfer doesn't connect,
+        the AI lets the customer know our experts are busy and someone
+        will call back, then ends the call warmly.
+        """
+        normalised = (dial_call_status or "").lower()
+        log.info("[%s] transfer status = %s", sid, normalised)
+
+        if normalised in ("completed", "answered"):
+            # Bridge succeeded and is now over — end this leg quietly.
+            return twiml.hangup()
+
+        # Failure path — synthesise the apology line on demand and play it.
+        state = self._state.get(sid)
+        if state is None:
+            return twiml.hangup()
+
+        us = await settings_service.for_user(state.user_id)
+        # Phrase agreed with the operator. Kept short so it fits the
+        # standard 2-sentence cap without sounding rushed.
+        apology = (
+            "Looks like our experts are busy at the moment — they'll "
+            "call you back as soon as they're available. Thank you for "
+            "understanding, and have a great day!"
+        )
+        from app.core.config import get_settings
+        base = get_settings().base_url
+
+        # Synthesise + cache the audio in state so /reply-audio can serve
+        # it. We reuse the pending_text + producer-queue pathway so we
+        # don't have to invent a second audio-serving endpoint.
+        audio = await tts_provider.synthesize(
+            apology, voice_id=us.resolve_voice_id()
+        )
+        if not audio:
+            # If TTS failed, end the call rather than hang silent.
+            log.error("[%s] transfer-failed apology TTS failed", sid)
+            return twiml.hangup()
+
+        # Stash in a fresh queue with a single chunk so /reply-audio
+        # streams it the same way it streams normal replies.
+        state.reply_audio_queue = asyncio.Queue(maxsize=2)
+        await state.reply_audio_queue.put(audio)
+        await state.reply_audio_queue.put(None)
+        state.pending_hangup = True   # play it, then post-reply will hang up
+
+        audio_url = f"{base}/webhooks/twilio/reply-audio?sid={sid}"
+        return twiml.listen_with_play(audio_url)
 
     # ── Serve reply audio ────────────────────────────────────
     async def stream_reply_audio(self, sid: str) -> AsyncIterator[bytes] | None:

@@ -87,6 +87,48 @@ async def reply_audio(sid: str = "") -> Response:
 
 
 @router.post(
+    "/post-reply-action",
+    dependencies=[Depends(verify_twilio_signature)],
+)
+async def post_reply_action(
+    CallSid: Annotated[str | None, Form()] = None,
+) -> Response:
+    """Twilio hits this AFTER the AI's reply audio finishes playing.
+
+    The orchestrator decides what to do next: hang up, transfer, or
+    resume listening. See call_orchestrator.handle_post_reply_action().
+    Existence of this endpoint is what fixes the "AI says goodbye but
+    call doesn't end" bug — previously the <Gather> swallowed the
+    end-of-call signal.
+    """
+    xml = await call_orchestrator.handle_post_reply_action(sid=CallSid or "")
+    return Response(content=xml, media_type="text/xml")
+
+
+@router.post(
+    "/transfer-status",
+    dependencies=[Depends(verify_twilio_signature)],
+)
+async def transfer_status(
+    sid:             str = "",                                 # query param
+    CallSid:         Annotated[str | None, Form()] = None,     # form, also fine
+    DialCallStatus:  Annotated[str | None, Form()] = None,
+) -> Response:
+    """Twilio hits this when a <Dial> finishes (success or failure).
+
+    DialCallStatus tells us whether the transferee actually picked up.
+    On success: hang up this leg cleanly. On failure: play the polite
+    "experts are busy" line and hang up.
+    """
+    effective_sid = sid or CallSid or ""
+    xml = await call_orchestrator.handle_transfer_status(
+        sid=effective_sid,
+        dial_call_status=DialCallStatus or "",
+    )
+    return Response(content=xml, media_type="text/xml")
+
+
+@router.post(
     "/recording-status",
     dependencies=[Depends(verify_twilio_signature)],
 )

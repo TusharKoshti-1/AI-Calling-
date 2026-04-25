@@ -28,6 +28,7 @@ log = get_logger(__name__)
 ALLOWED_SETTING_KEYS: frozenset[str] = frozenset({
     "agent_name", "agency_name", "system_prompt", "voice_id",
     "llm_provider", "openai_api_key", "openai_model", "groq_model",
+    "transfer_number",
 })
 
 
@@ -42,6 +43,9 @@ def _defaults_from_env() -> dict[str, str]:
         "openai_api_key": "",
         "openai_model":   env.openai_model,
         "groq_model":     env.groq_model,
+        # Empty by default — when blank, [TRANSFER_CALL] gracefully degrades
+        # to ending the call rather than dialling nothing.
+        "transfer_number": "",
     }
 
 
