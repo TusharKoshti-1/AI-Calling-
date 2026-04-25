@@ -21,24 +21,35 @@ from app.core.config import get_settings as get_env
 from app.core.logging import get_logger
 from app.db.repositories.settings import SettingsRepository
 from app.services.prompts import render_default_prompt
-from app.services.tts import DEFAULT_VOICE_ID
 
 log = get_logger(__name__)
 
 ALLOWED_SETTING_KEYS: frozenset[str] = frozenset({
     "agent_name", "agency_name", "system_prompt", "voice_id",
     "llm_provider", "openai_api_key", "openai_model", "groq_model",
-    "transfer_number",
+    "transfer_number", "language",
 })
+
+
+# ElevenLabs default voice ID for English-US (warm professional female).
+# This is what Twilio's voice picker exposes as the default for en-US in
+# ConversationRelay. Operators can pick a different voice from
+# https://www.twilio.com/docs/voice/conversationrelay/voice-configuration
+# and paste the ID into the dashboard's Voice setting.
+DEFAULT_ELEVENLABS_VOICE_ID = "UgBBYS2sOqTuMpoF3BR0"
 
 
 def _defaults_from_env() -> dict[str, str]:
     env = get_env()
+    # voice_id default: prefer ElevenLabs since ConversationRelay uses
+    # ElevenLabs by default. Cartesia voice IDs no longer apply (the
+    # Cartesia TTS path was removed in v10), so we fall back to the
+    # ElevenLabs default rather than env.cartesia_voice_id.
     return {
         "agent_name":     env.agent_name,
         "agency_name":    env.agency_name,
         "system_prompt":  "default",
-        "voice_id":       env.cartesia_voice_id or DEFAULT_VOICE_ID,
+        "voice_id":       DEFAULT_ELEVENLABS_VOICE_ID,
         "llm_provider":   env.llm_provider,
         "openai_api_key": "",
         "openai_model":   env.openai_model,
@@ -46,6 +57,11 @@ def _defaults_from_env() -> dict[str, str]:
         # Empty by default — when blank, [TRANSFER_CALL] gracefully degrades
         # to ending the call rather than dialling nothing.
         "transfer_number": "",
+        # ConversationRelay STT/TTS language. Set to "multi" for auto-
+        # detection when the customer base speaks multiple languages
+        # (English / Hindi / Arabic mixed). Default en-US works for
+        # most outbound campaigns.
+        "language": "en-US",
     }
 
 
@@ -72,8 +88,20 @@ class UserSettings:
         return snap
 
     def resolve_voice_id(self) -> str:
+        # Priority: per-user setting → env override → ElevenLabs default.
+        # We no longer use the Cartesia default here because v10 routes
+        # TTS through ConversationRelay (ElevenLabs), and a Cartesia voice
+        # ID won't validate on the Twilio side.
         v = (self._data.get("voice_id") or "").strip()
-        return v or get_env().cartesia_voice_id or DEFAULT_VOICE_ID
+        if v:
+            return v
+        env_voice = (get_env().cartesia_voice_id or "").strip()
+        # Heuristic: if the env voice looks like a UUID it's a Cartesia
+        # ID (won't work in ConversationRelay). Use the EL default
+        # instead. ElevenLabs IDs are 20 chars alphanumeric (no dashes).
+        if env_voice and "-" not in env_voice:
+            return env_voice
+        return DEFAULT_ELEVENLABS_VOICE_ID
 
     def resolve_system_prompt(self) -> str:
         sp = (self._data.get("system_prompt") or "").strip()

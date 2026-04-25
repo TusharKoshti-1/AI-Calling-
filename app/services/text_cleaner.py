@@ -21,34 +21,15 @@ from dataclasses import dataclass
 
 # Words/phrases that unambiguously signal the LLM is wrapping up, even
 # when it forgets to emit [END_CALL]. Matched as whole phrases, not substrings.
-#
-# These are intentionally biased toward "definitely ending" — false
-# positives here mean the call ends one turn too early, which is FAR
-# better than the alternative (call sits open in silence forever after
-# the AI says "have a good day"). gpt-4o-mini is the worst offender at
-# forgetting [END_CALL], so we cast a wide net.
 END_PHRASES: tuple[str, ...] = (
-    # Standard wrap-ups
     "have a good day", "have a great day", "have a wonderful day",
-    "have a nice day", "have a lovely day", "have a good one",
-    "take care", "good day", "goodbye", "bye for now",
-    "talk soon", "talk to you later", "talk to you soon",
-    "all the best", "wish you the best", "best of luck",
-    # Service-context closers
+    "take care", "good day", "goodbye", "talk soon", "all the best",
     "follow up in a few months", "call you back later", "call back later",
-    "i'll call you back", "i'll reach back out",
     "reach out to you", "consultant will call", "team will contact",
-    "team will reach out", "someone will call you",
-    "experts will call", "expert will call", "be in touch",
-    # Customer-not-interested closers
-    "not interested", "won't bother you", "won't disturb you",
-    "i'll let you go", "let you go now",
-    # Driving / busy closers
-    "drive safe", "drive safely",
+    "not interested", "won't bother you", "i'll let you go", "best of luck",
     # Hindi / Hinglish wrap-ups
     "dhanyavaad", "shukriya", "baad mein baat karte", "thodi der baad call",
     "apna khayal rakhna", "badhai ho", "future mein zaroor", "phir milte hain",
-    "alvida", "namaste",
     # Arabic wrap-ups
     "مع السلامة", "في أمان الله", "إلى اللقاء", "يوم سعيد",
     "سنتواصل معك", "شكراً جزيلاً",

@@ -40,6 +40,18 @@
                   <div class="f-sub">When the AI decides to hand off to a human (or the customer asks for one), the call is transferred here. Use full international format, e.g. <code>+971501234567</code>. Leave blank to disable transfers.</div>
                   <input class="f-input" id="s-transfer-number" placeholder="+971501234567" inputmode="tel"/>
                 </div>
+                <div class="field-group settings-full">
+                  <label class="f-label">Call Language</label>
+                  <div class="f-sub">Speech-to-text and text-to-speech language. Pick <code>multi</code> if your customers speak a mix of languages (e.g. English / Hindi / Arabic) and you want auto-detection. Otherwise pick the primary language.</div>
+                  <select class="f-input" id="s-language">
+                    <option value="en-US">English (US)</option>
+                    <option value="en-GB">English (UK)</option>
+                    <option value="en-IN">English (India)</option>
+                    <option value="en-AU">English (Australia)</option>
+                    <option value="hi-IN">Hindi</option>
+                    <option value="multi">Multi-language (auto-detect)</option>
+                  </select>
+                </div>
               </div>
               <div class="save-bar">
                 <button class="btn btn-gold" id="saveIdentityBtn">Save Identity</button>
