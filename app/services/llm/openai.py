@@ -42,13 +42,19 @@ OPENAI_URL = "https://api.openai.com/v1/chat/completions"
 FALLBACK_REPLY = "Sorry, I missed that — could you say that again?"
 
 # Boundary characters that end a "speakable" chunk. We stream tokens until we
-# hit one of these, then yield the chunk to TTS. Picking these characters
-# (not just ".") lets us kick off TTS after the first clause if the LLM
-# uses commas, which on real calls is common for natural-sounding replies.
-_SENTENCE_ENDERS = frozenset(".!?…\n")
-# Minimum chars before we'll emit a chunk. Keeps us from sending 3-word
-# fragments to Cartesia, which sounds choppy and wastes TTS requests.
+# hit one of these, then yield the chunk to TTS. Including commas + dashes
+# lets us kick off TTS after the first clause, not the first full sentence —
+# big latency win because real human-style replies use them constantly.
+_SENTENCE_ENDERS = frozenset(".!?…,—\n")
+# Minimum chars before we'll emit a SUBSEQUENT chunk. Smaller is faster but
+# choppier; 40 is a good balance for Cartesia.
 _MIN_CHUNK_CHARS = 40
+# For the FIRST chunk we lower the threshold drastically — getting audio
+# playing fast is more important than chunk size on the very first audio
+# the customer hears (every ms of dead air feels long). 6 chars catches
+# casual short clauses like "Got it," / "Sure," / "Hi there," — exactly
+# the conversational starters our prompt encourages.
+_FIRST_CHUNK_MIN_CHARS = 6
 
 
 def _build_messages(
@@ -161,6 +167,7 @@ class OpenAIProvider:
         inside_tag = False    # are we mid-"[HOT_LEAD]" / "[END_CALL]"?
         tag_buffer = ""       # raw chars while inside a tag
         got_anything = False
+        chunks_emitted = 0    # used to apply the smaller first-chunk threshold
 
         try:
             async with client.stream(
@@ -215,11 +222,22 @@ class OpenAIProvider:
 
                         buffer += ch
 
-                        # Emit on sentence boundary once we have enough text.
-                        if ch in _SENTENCE_ENDERS and len(buffer) >= _MIN_CHUNK_CHARS:
+                        # Emit on a clause/sentence boundary. The first
+                        # chunk uses a smaller threshold so audio starts
+                        # playing fast — the customer hears something
+                        # within ~600-800ms of finishing their turn
+                        # instead of waiting for a full sentence to
+                        # synthesise.
+                        threshold = (
+                            _FIRST_CHUNK_MIN_CHARS
+                            if chunks_emitted == 0
+                            else _MIN_CHUNK_CHARS
+                        )
+                        if ch in _SENTENCE_ENDERS and len(buffer) >= threshold:
                             chunk = buffer.strip()
                             if chunk:
                                 yield chunk
+                                chunks_emitted += 1
                             buffer = ""
 
                 # Flush any remaining non-tag buffer.
@@ -233,145 +251,3 @@ class OpenAIProvider:
             log.error("OpenAI stream failed: %s", exc)
             if not got_anything:
                 yield FALLBACK_REPLY
-
-    async def stream_tokens(
-        self,
-        customer_text: str,
-        *,
-        history: list[dict[str, str]] | None = None,
-        system_prompt: str,
-        model: str | None = None,
-        api_key: str | None = None,
-    ) -> AsyncIterator[tuple[str, dict[str, bool]]]:
-        """Stream TOKEN-level deltas suitable for ConversationRelay.
-
-        Yields tuples of (text_chunk, flags) where flags is a dict that
-        may contain:
-          - "last": True only on the final yielded chunk (signals to
-            ConversationRelay that the talk-cycle is over).
-
-        Why token-level instead of sentence-level?
-        ConversationRelay's TTS is itself streaming — it begins synthesising
-        as soon as we send the first text token. Sending one big sentence
-        means TTS waits for the whole sentence before it starts. Sending
-        tokens as they arrive lets TTS begin immediately, dropping
-        time-to-first-audio by ~200-400 ms on a typical reply.
-
-        Tag handling:
-        Same tag-buffering as stream_sentences — we swallow [HOT_LEAD],
-        [END_CALL], [TRANSFER_CALL] and any other [BRACKETED] tokens so
-        Twilio's TTS never reads them aloud. Callers who want the flags
-        can re-run the joined text through clean_reply afterwards.
-        """
-        s = get_settings()
-        effective_key = (api_key or s.openai_api_key or "").strip()
-        chosen_model = (model or s.openai_model).strip() or "gpt-4o-mini"
-
-        if not effective_key or not effective_key.startswith("sk-"):
-            log.error("OpenAI API key missing or invalid (token streaming).")
-            yield FALLBACK_REPLY, {"last": True}
-            return
-
-        payload = {
-            "model": chosen_model,
-            "messages": _build_messages(system_prompt, history, customer_text),
-            "temperature": s.openai_temperature,
-            "max_completion_tokens": s.openai_max_tokens,
-            "stream": True,
-        }
-        headers = {
-            "Authorization": f"Bearer {effective_key}",
-            "Content-Type": "application/json",
-            "Accept": "text/event-stream",
-        }
-
-        client = get_openai_client()
-        # Pending text we've decided to emit but haven't yielded yet — we
-        # emit on the next iteration so we can mark the FINAL emit with
-        # last=True. Without this we'd either need a buffered look-ahead
-        # or a separate "last" message after the loop, both clunkier.
-        pending: str = ""
-        inside_tag = False
-        tag_buffer = ""
-        got_anything = False
-
-        try:
-            async with client.stream(
-                "POST", OPENAI_URL, headers=headers, json=payload
-            ) as resp:
-                if resp.status_code != 200:
-                    body = (await resp.aread()).decode("utf-8", "replace")[:400]
-                    log.error("OpenAI stream %s: %s", resp.status_code, body)
-                    yield FALLBACK_REPLY, {"last": True}
-                    return
-
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        break
-                    try:
-                        obj = json.loads(data)
-                    except json.JSONDecodeError:
-                        continue
-                    try:
-                        delta = obj["choices"][0].get("delta", {}).get("content")
-                    except (KeyError, IndexError):
-                        delta = None
-                    if not delta:
-                        continue
-
-                    got_anything = True
-                    # Build up the visible (non-tag) portion of this delta.
-                    visible = ""
-                    for ch in delta:
-                        if inside_tag:
-                            tag_buffer += ch
-                            if ch == "]":
-                                inside_tag = False
-                                tag_buffer = ""
-                            elif len(tag_buffer) > 32:
-                                # Wasn't really a tag — flush as visible.
-                                visible += tag_buffer
-                                inside_tag = False
-                                tag_buffer = ""
-                            continue
-                        if ch == "[":
-                            inside_tag = True
-                            tag_buffer = "["
-                            continue
-                        visible += ch
-
-                    if not visible:
-                        continue
-
-                    # Emit the previous chunk now (we know it's not last
-                    # because we have a new chunk after it).
-                    if pending:
-                        yield pending, {"last": False}
-                    pending = visible
-
-                # Drain the buffered tag if it never closed.
-                if tag_buffer and not inside_tag:
-                    pending += tag_buffer
-
-                # Final emit (or empty fallback).
-                if pending:
-                    yield pending, {"last": True}
-                elif not got_anything:
-                    yield FALLBACK_REPLY, {"last": True}
-                else:
-                    # Got tokens but somehow they were all tags. Send a
-                    # zero-length "last" marker so ConversationRelay
-                    # closes the talk-cycle cleanly.
-                    yield "", {"last": True}
-
-        except Exception as exc:
-            log.error("OpenAI token stream failed: %s", exc)
-            if not got_anything:
-                yield FALLBACK_REPLY, {"last": True}
-            elif pending:
-                yield pending, {"last": True}
-            else:
-                yield "", {"last": True}

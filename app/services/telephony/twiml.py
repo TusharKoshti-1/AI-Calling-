@@ -1,175 +1,258 @@
 """
 app.services.telephony.twiml
 ────────────────────────────
-TwiML response builders.
+Typed TwiML response builders.
 
-This file is intentionally tiny because ConversationRelay does the heavy
-lifting now. Where v9 had ~700 lines of chunked-audio TwiML helpers,
-v10 needs four:
+Why this module looks the way it does
+─────────────────────────────────────
+Twilio's <Play> verb does NOT support HTTP chunked transfer encoding.
+We learned this the painful way — earlier versions used a single big
+StreamingResponse and Twilio would cut roughly half the calls because
+the response arrived without a Content-Length and Twilio gave up.
 
-  • connect_conversation_relay()  — the one TwiML we return on call
-                                    answer; hands control to the
-                                    websocket.
-  • hangup()                      — fallback for error paths.
-  • dial_transfer_number()        — for live-agent handoff after the
-                                    websocket session ends.
-  • transfer_failed()             — the polite "experts are busy"
-                                    closer when a transfer doesn't
-                                    connect.
+The cure is "chunked TwiML" not "chunked HTTP":
+  • Each individual <Play> URL points at a complete WAV with a real
+    Content-Length header.
+  • Multiple <Play> verbs in one TwiML response queue up — Twilio
+    plays them seamlessly one after the other.
+  • While the customer hears chunk N, the server has time to finish
+    synthesising chunk N+1.
 
-Everything that used to be in here — chunk-by-chunk Play orchestration,
-silence-prompt redirects, post-reply-action hooks — is GONE. The
-websocket replaces all of it.
+So a "streaming reply" looks like:
+    <Response>
+      <Play>/reply-audio?sid=...&part=0</Play>   ← first sentence
+      <Play>/reply-audio?sid=...&part=1</Play>   ← second sentence
+      <Gather ...>                               ← then listen
+    </Response>
+
+Each /reply-audio?part=N call returns one self-contained WAV with
+Content-Length set. Twilio is happy. Customer hears continuous speech.
+
+Barge-in
+────────
+Wrapping <Play> inside <Gather input="speech"> tells Twilio to STOP
+playback the moment the customer starts speaking. That's how real
+voice bots feel "alive" — you can interrupt them.
 """
 from __future__ import annotations
 
-from xml.sax.saxutils import escape, quoteattr
+from xml.sax.saxutils import escape
 
 from app.core.config import get_settings
+
+# Twilio accepts either a number of seconds or the string "auto".
+# "auto" enables Twilio's adaptive endpointing — it detects when the
+# customer has actually finished speaking instead of waiting a flat
+# half-second. In practice this saves 200-500ms per turn.
+SPEECH_TIMEOUT = "auto"
+# How long Gather waits for the customer to START talking before giving
+# up. Without barge-in, the customer can only speak AFTER the AI
+# finishes a turn — so they sometimes pause briefly to think before
+# replying. 7 seconds is a comfortable default that doesn't feel
+# pressuring; if they truly stay silent, /silence-prompt prompts them
+# once and then the call ends after a second silence.
+INPUT_TIMEOUT = 7
 
 
 def _wrap(body: str) -> str:
     return f'<?xml version="1.0" encoding="UTF-8"?>\n<Response>\n{body}\n</Response>'
 
 
-def _base_wss_url() -> str:
-    """Derive the WSS URL of our own server from the configured base_url.
+def _base_url() -> str:
+    return get_settings().base_url
 
-    base_url is set as e.g. https://your-app.onrender.com
-    The websocket lives at wss://your-app.onrender.com/webhooks/twilio/cr
+
+def _gather_attrs(barge_in: bool = False) -> str:
+    """Common <Gather> attributes.
+
+    barge_in is FALSE by default in v11. We deliberately do NOT let
+    the customer interrupt the AI mid-sentence:
+
+      • The AI's playback runs to completion.
+      • THEN Gather opens its STT window and listens for the customer.
+      • If the customer started talking just before the AI finished,
+        Twilio's STT picks them up cleanly because they keep talking
+        into the now-open Gather window. (Real-world calls have
+        natural micro-pauses between sentences that the customer's
+        mid-utterance gets bridged across.)
+
+    This trades a tiny bit of "interruptibility" for two things that
+    matter much more in practice:
+      1. RELIABILITY — barge-in had a known failure mode where Twilio
+         cut the AI's reply on phantom noise (cough, tap, line buzz).
+      2. NATURAL PHRASING — a complete sentence sounds human; a
+         truncated one sounds like a glitchy IVR.
     """
-    base = get_settings().base_url.rstrip("/")
-    if base.startswith("https://"):
-        return "wss://" + base[len("https://"):]
-    if base.startswith("http://"):
-        return "ws://" + base[len("http://"):]
-    return base  # already protocol-prefixed or weird; let it through
-
-
-def connect_conversation_relay(
-    *,
-    user_id: str,
-    welcome_greeting: str,
-    voice_id: str,
-    tts_provider: str = "ElevenLabs",
-    language: str = "en-US",
-    transcription_provider: str = "Deepgram",
-    speech_model: str = "nova-3-general",
-    hints: str = "",
-) -> str:
-    """Build the <Connect><ConversationRelay> TwiML.
-
-    Twilio fetches this on call-answer. The TwiML asks Twilio to:
-      1. Open a websocket to our server at /webhooks/twilio/cr/{user_id}
-         (the user_id in the path is how the websocket handler knows
-         which tenant's settings to load — Twilio doesn't pass any
-         auth on the websocket, only the call SID and customParameters).
-      2. Use ElevenLabs for TTS with the user's chosen voice.
-      3. Use Deepgram nova-3 for transcription (faster than Google, and
-         the default for new accounts since Sept 2025).
-      4. Speak the welcome_greeting immediately on connect — this is
-         what the customer hears as the AI's opening line. Generated by
-         the LLM at call-init time and passed through here so we don't
-         need a separate /opening-audio endpoint.
-
-    Notes on attributes:
-      • interruptible="any" — customer can barge-in over the AI by
-        speaking. Critical for natural conversation feel.
-      • welcomeGreetingInterruptible="any" — they can also interrupt
-        the opening line.
-      • interruptSensitivity="medium" — high gives too many false barge-
-        ins on noisy phone lines; low feels sluggish. Medium is the
-        sweet spot per Twilio's own best-practice doc.
-      • reportInputDuringAgentSpeech="speech" — we WANT to know when the
-        customer is speaking even mid-AI-utterance, so we can cancel the
-        in-flight LLM stream. (Default since May 2025 is "none", which
-        means the AI keeps talking unaware. We override.)
-
-    The custom <Parameter> elements forward the call's user_id and
-    other tenant context to the websocket setup message — that's how
-    the handler knows which user this call belongs to.
-    """
-    s = get_settings()
-    ws_url = f"{_base_wss_url()}/webhooks/twilio/cr"
-
-    # ConversationRelay attributes are XML attributes — they need
-    # their values to be quoted-and-escaped properly. quoteattr handles
-    # both the surrounding quotes and the escaping of any " inside.
-    attrs_parts: list[str] = [
-        f"url={quoteattr(ws_url)}",
-        f"welcomeGreeting={quoteattr(welcome_greeting)}",
-        f'welcomeGreetingInterruptible="any"',
-        f"voice={quoteattr(voice_id)}",
-        f"ttsProvider={quoteattr(tts_provider)}",
-        f"language={quoteattr(language)}",
-        f"transcriptionProvider={quoteattr(transcription_provider)}",
-        f"speechModel={quoteattr(speech_model)}",
-        f'interruptible="any"',
-        f'interruptSensitivity="medium"',
-        f'reportInputDuringAgentSpeech="speech"',
-    ]
-    if hints:
-        attrs_parts.append(f"hints={quoteattr(hints)}")
-    attrs = " ".join(attrs_parts)
-
-    # We pass user_id as a custom <Parameter> so the websocket handler's
-    # "setup" message has it. The path-only approach (?user_id=...) does
-    # NOT work — Twilio strips query strings on websocket connect.
-    # customParameters is the documented way to forward tenant data.
-    parameter_lines = [
-        f'    <Parameter name="user_id" value={quoteattr(user_id)} />',
-    ]
-
-    # Action URL fires after the <Connect> verb ends (websocket closed
-    # OR session ended via end-message). We use it for the live-agent
-    # handoff flow — when the AI emits [TRANSFER_CALL], we close the
-    # websocket with handoffData saying "transfer to X", and Twilio
-    # POSTs back to /webhooks/twilio/cr-action which dials the human.
-    action_url = f"{s.base_url}/webhooks/twilio/cr-action"
-
-    body = (
-        f'  <Connect action="{escape(action_url)}" method="POST">\n'
-        f"    <ConversationRelay {attrs}>\n"
-        + "\n".join(parameter_lines) + "\n"
-        f"    </ConversationRelay>\n"
-        f"  </Connect>"
+    s = _base_url()
+    barge = "true" if barge_in else "false"
+    return (
+        f'input="speech" '
+        f'action="{s}/webhooks/twilio/process-speech" '
+        f'method="POST" '
+        f'speechTimeout="{SPEECH_TIMEOUT}" '
+        f'language="en-US" '
+        f'timeout="{INPUT_TIMEOUT}" '
+        f'bargeIn="{barge}" '
+        f'profanityFilter="false"'
     )
-    return _wrap(body)
+
+
+# ── Greeting / opening ──────────────────────────────────────────
+def play_then_listen(play_url: str) -> str:
+    """Play one audio file in full, then listen for the customer's reply.
+
+    Used for the opening line. Single <Play> wrapped in <Gather> with
+    bargeIn=false: the audio plays end-to-end, then Gather opens its
+    STT window. If the customer talks while the audio is playing,
+    Twilio simply doesn't capture it — but the customer naturally
+    keeps talking into the open Gather window the moment the AI's
+    audio ends, so they're heard correctly.
+
+    The trailing <Redirect> is a safety net: if Gather times out with
+    no speech (long silence), we route to /silence-prompt rather than
+    leaving the call hung in a TwiML void.
+    """
+    s = _base_url()
+    return _wrap(
+        f'  <Gather {_gather_attrs(barge_in=False)}>\n'
+        f'    <Play>{escape(play_url)}</Play>\n'
+        f'  </Gather>\n'
+        f'  <Redirect method="POST">{s}/webhooks/twilio/silence-prompt</Redirect>'
+    )
+
+
+# ── Multi-chunk reply (the streaming flow) ──────────────────────
+def play_chunks_then_listen(play_urls: list[str]) -> str:
+    """Play a sequence of audio chunks in full, then listen.
+
+    This is the workhorse of the conversational loop. Each url in
+    `play_urls` is a self-contained WAV (with Content-Length set on
+    the response). They play seamlessly in order; <Gather> wraps them
+    with bargeIn=false so the AI never gets cut off mid-sentence.
+
+    Why we chunk instead of using one big <Play>: chunking lets the
+    FIRST chunk start playing while the LATER chunks are still being
+    synthesised server-side. That's how we keep first-audio latency
+    low without using HTTP chunked transfer (which Twilio doesn't
+    support reliably for <Play>).
+
+    The trade: customer can't barge in mid-AI-utterance. They can
+    speak the moment the audio finishes — Gather's STT window opens
+    immediately at that point.
+    """
+    if not play_urls:
+        return listen_silent()
+    s = _base_url()
+    plays = "\n".join(
+        f'    <Play>{escape(url)}</Play>' for url in play_urls
+    )
+    return _wrap(
+        f'  <Gather {_gather_attrs(barge_in=False)}>\n'
+        f'{plays}\n'
+        f'  </Gather>\n'
+        f'  <Redirect method="POST">{s}/webhooks/twilio/silence-prompt</Redirect>'
+    )
+
+
+def play_chunks_then_hangup(play_urls: list[str]) -> str:
+    """Play final audio chunks and hang up. No further input.
+
+    Used when the AI's reply contained [END_CALL] or [HOT_LEAD] —
+    we want the customer to hear the closing line in full and then
+    the call ends cleanly with no awkward silence after.
+
+    Note: bargeIn is OFF here because there's no point — even if
+    the customer interrupts, we're hanging up next anyway, and a
+    truncated goodbye sounds worse than a complete one.
+    """
+    if not play_urls:
+        return hangup_clean()
+    plays = "\n".join(
+        f'  <Play>{escape(url)}</Play>' for url in play_urls
+    )
+    return _wrap(
+        f'{plays}\n'
+        f'  <Pause length="1"/>\n'
+        f'  <Hangup/>'
+    )
+
+
+def play_chunks_then_transfer(
+    play_urls: list[str], transfer_number: str, sid: str,
+    timeout_seconds: int = 25,
+) -> str:
+    """Play 'connecting you now' lines, then dial a human.
+
+    If the dial fails or no one picks up, Twilio fires the action URL
+    with DialCallStatus, which then plays the polite fallback line.
+    """
+    s = _base_url()
+    plays = "\n".join(
+        f'  <Play>{escape(url)}</Play>' for url in play_urls
+    )
+    return _wrap(
+        f'{plays}\n'
+        f'  <Dial timeout="{timeout_seconds}" '
+        f'action="{s}/webhooks/twilio/transfer-status?sid={escape(sid)}" '
+        f'method="POST">\n'
+        f'    {escape(transfer_number)}\n'
+        f'  </Dial>'
+    )
+
+
+# ── Listening / silence handling ────────────────────────────────
+def listen_silent() -> str:
+    """Open a fresh <Gather> with no audio.
+
+    Used when:
+      • The customer's previous turn was empty (mis-detection).
+      • A <Gather> timed out — we give them one more chance to speak.
+    """
+    s = _base_url()
+    return _wrap(
+        f'  <Gather {_gather_attrs(barge_in=False)}>\n'
+        f'    <Pause length="1"/>\n'
+        f'  </Gather>\n'
+        f'  <Redirect method="POST">{s}/webhooks/twilio/silence-prompt</Redirect>'
+    )
+
+
+# ── Hangup ──────────────────────────────────────────────────────
+def hangup_clean() -> str:
+    """Just hang up. Pause first so any in-flight audio gets a chance
+    to actually reach the caller's ear before we cut the line."""
+    return _wrap(
+        f'  <Pause length="1"/>\n'
+        f'  <Hangup/>'
+    )
+
+
+# ── Legacy helpers kept for back-compat with code that still calls them ─
+def listen_with_play(play_url: str) -> str:
+    """DEPRECATED: legacy name. Routes to play_then_listen."""
+    return play_then_listen(play_url)
+
+
+def listen_for_speech() -> str:
+    """DEPRECATED: legacy name. Routes to listen_silent."""
+    return listen_silent()
 
 
 def hangup() -> str:
-    """End the call cleanly. Used as a fallback when something is wrong
-    (unknown user, missing config, etc.) — better to hang up gracefully
-    than to leave Twilio playing silence indefinitely."""
-    return _wrap("  <Hangup/>")
+    """DEPRECATED: legacy name. Routes to hangup_clean."""
+    return hangup_clean()
 
 
-def dial_transfer_number(number: str, sid: str, *, timeout: int = 25) -> str:
-    """Dial a human teammate. Used when the AI signaled [TRANSFER_CALL].
-
-    The action URL fires whether the dial succeeds or fails (DialCallStatus
-    distinguishes them) so we can play the polite fallback if no one
-    answered.
-    """
-    s = get_settings()
-    action = f"{s.base_url}/webhooks/twilio/transfer-status?sid={escape(sid)}"
-    return _wrap(
-        f'  <Dial timeout="{timeout}" action="{escape(action)}" method="POST">\n'
-        f"    {escape(number)}\n"
-        f"  </Dial>"
-    )
+def play_and_hangup(play_url: str) -> str:
+    """DEPRECATED: legacy name. Single-chunk hangup version."""
+    return play_chunks_then_hangup([play_url])
 
 
-def transfer_failed(message: str) -> str:
-    """Speak a polite closer when transfer didn't connect, then hang up.
+def transfer_call(transfer_number: str, sid: str, *, timeout_seconds: int = 25) -> str:
+    """DEPRECATED: legacy name. Transfer with no audio prelude."""
+    return play_chunks_then_transfer([], transfer_number, sid, timeout_seconds)
 
-    We use Twilio's built-in <Say> here rather than ElevenLabs because at
-    this point the websocket session has already ended; we want a simple
-    final TwiML that doesn't need the relay infrastructure. Twilio's
-    Polly voice is acceptable for one short sentence.
-    """
-    return _wrap(
-        f'  <Say voice="Polly.Joanna-Neural">{escape(message)}</Say>\n'
-        f"  <Pause length=\"1\"/>\n"
-        f"  <Hangup/>"
-    )
+
+def transfer_failed_message(audio_url: str) -> str:
+    """DEPRECATED: the new transfer-status flow uses play_chunks_then_hangup."""
+    return play_chunks_then_hangup([audio_url])

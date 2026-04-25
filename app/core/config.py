@@ -135,14 +135,17 @@ class Settings(BaseSettings):
     # biggest lever for call quality. Users can still override per-user
     # in the Settings page.
     openai_api_key: str = ""
-    openai_model: str = "gpt-4o"
+    openai_model: str = "gpt-4o-mini"
     # Higher temperature lets Sara sound conversational rather than
     # reading scripted lines verbatim. 0.3 was fine for a rigid state
     # machine; 0.7 is better for a persona.
     openai_temperature: float = 0.7
-    # 180 leaves headroom for 2 sentences + any leading control tag
-    # without forcing the model to truncate mid-thought.
-    openai_max_tokens: int = 180
+    # 120 enforces brevity: at ~3-4 tokens per word, this allows up to
+    # ~30 words = roughly 2 short sentences, which is the prompt's hard
+    # ceiling. v9 used 180; with v11's stronger "ONE sentence preferred"
+    # prompt, 120 is plenty and slightly faster (less to generate, less
+    # to TTS, lower cost).
+    openai_max_tokens: int = 120
 
     llm_provider: Literal["groq", "openai"] = "openai"
 

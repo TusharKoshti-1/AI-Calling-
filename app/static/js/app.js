@@ -486,7 +486,6 @@
       setVal('s-agent-name', s.agent_name);
       setVal('s-agency-name', s.agency_name);
       setVal('s-transfer-number', s.transfer_number);
-      setVal('s-language', s.language || 'en-US');
       setVal('s-system-prompt', s.system_prompt);
       const provider = (s.llm_provider || 'openai').toLowerCase();
       _setLLMButtons(provider);
@@ -544,15 +543,11 @@
   }
 
   async function saveIdentity() {
-    const langEl = document.getElementById('s-language');
     const body = {
       agent_name: document.getElementById('s-agent-name').value.trim(),
       agency_name: document.getElementById('s-agency-name').value.trim(),
       transfer_number: document.getElementById('s-transfer-number').value.trim(),
     };
-    // Only send language if the field exists on this page (it's only
-    // on the settings page, not all variants of the legacy index).
-    if (langEl) body.language = langEl.value.trim() || 'en-US';
     try {
       const d = await api('/api/settings', 'POST', body);
       if (d.success) {
