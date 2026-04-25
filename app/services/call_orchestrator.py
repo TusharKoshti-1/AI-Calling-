@@ -31,13 +31,15 @@ Result: the customer typically hears the first word ~800–1200 ms sooner
 than on a non-streaming pipeline, and the rest of the reply lands
 without a visible seam.
 
-Cross-call memory
-─────────────────
-Before each call we look up (user_id, phone) in customer_memory and
-inject a compact CUSTOMER CONTEXT block into the system prompt — so
-Sara "remembers" the car model, last service status, etc. After the
-call ends we run a cheap extraction pass on the transcript and upsert
-any new facts. See app/services/memory_service.py.
+In-call memory
+──────────────
+The LLM remembers everything from the CURRENT call: every customer
+turn and every AI reply is appended to `state.history`, and the full
+history is replayed to the LLM on every new reply. This is plain
+conversation context — no DB, no extraction, no persistence.
+
+When the call ends, `state` is discarded and the conversation memory
+goes with it. There is intentionally NO cross-call memory.
 
 Scaling:
   • The in-memory `_state` map works for one worker. To run multiple
@@ -56,7 +58,6 @@ from app.db.repositories.calls import CallsRepository
 from app.db.repositories.messages import MessagesRepository
 from app.services.llm import llm_registry
 from app.services.llm.openai import OpenAIProvider
-from app.services.memory_service import memory_service
 from app.services.settings_service import UserSettings, settings_service
 from app.services.storage import storage
 from app.services.telephony import twiml
@@ -76,11 +77,6 @@ class CallState:
     phone: str = ""
     history: list[dict[str, str]] = field(default_factory=list)
     started_at: str = ""
-
-    # Memory block to inject into every LLM prompt for this call.
-    # Resolved once at call start (or first webhook) and then reused —
-    # customer_memory doesn't change mid-call, so no point re-reading.
-    memory_context: str = ""
 
     # Opening-line audio is generated once at the greeting webhook and
     # cached here so the /opening-audio endpoint can serve it instantly.
@@ -250,15 +246,7 @@ class CallOrchestrator:
     async def register_outbound(
         self, sid: str, user_id: str, phone: str
     ) -> None:
-        """Record a call we just placed via Twilio.
-
-        Loads any prior customer_memory for this phone synchronously —
-        the greeting webhook fires within seconds of this call returning,
-        so memory MUST be in place before then. Earlier versions used
-        _spawn() here, which created a race: on slow DB days the greeting
-        would fire with empty memory and the AI would re-introduce itself
-        to a returning customer.
-        """
+        """Record a call we just placed via Twilio."""
         state = CallState(
             sid=sid,
             user_id=user_id,
@@ -268,20 +256,6 @@ class CallOrchestrator:
         self._state.put(state)
         us = await settings_service.for_user(user_id)
 
-        # Awaited (not spawned) — the few-hundred-ms cost happens during
-        # Twilio's dial time anyway, so it's hidden latency.
-        try:
-            state.memory_context = await memory_service.load_context_block(
-                user_id, phone,
-            )
-            if state.memory_context:
-                log.info("[%s] loaded memory context for %s", sid, phone)
-        except Exception as exc:
-            log.error("[%s] memory load failed: %s", sid, exc)
-
-        # Bump call count + DB row in the background — these are
-        # write-side, not read-on-greeting, so they're safe to defer.
-        _spawn(memory_service.record_call_start(user_id, phone))
         _spawn(
             self._calls.upsert(sid, user_id, {
                 "phone": phone,
@@ -322,16 +296,6 @@ class CallOrchestrator:
                 started_at=datetime.now(timezone.utc).isoformat(),
             )
             self._state.put(state)
-            # Inbound / post-restart path — load memory here since
-            # register_outbound wasn't called for this SID.
-            if to_number:
-                try:
-                    state.memory_context = await memory_service.load_context_block(
-                        user_id, to_number,
-                    )
-                except Exception as exc:
-                    log.error("[%s] memory load failed: %s", sid, exc)
-                _spawn(memory_service.record_call_start(user_id, to_number))
 
         us = await settings_service.for_user(user_id)
         _spawn(
@@ -372,15 +336,8 @@ class CallOrchestrator:
         provider = llm_registry.get(us.resolve_llm_provider())
         base_prompt = us.resolve_system_prompt()
 
-        # Attach the memory context (if any) to the base prompt. Done at
-        # prompt-build time rather than baked into resolve_system_prompt
-        # so that the setting is still stable/cacheable across users.
-        state = self._state.get(sid)
-        memory_block = state.memory_context if state else ""
-
         augmented = (
             base_prompt
-            + memory_block
             + "\n\n---\n[SYSTEM]: The call just connected. Deliver your opening line now. "
               "Do not include [END_CALL] or [HOT_LEAD]. One or two sentences only."
         )
@@ -525,11 +482,6 @@ class CallOrchestrator:
 
         try:
             system_prompt = us.resolve_system_prompt()
-            # Inject the customer memory block (empty string if no prior
-            # context). Keeps the user's configured system prompt in the
-            # cacheable prefix position while the memory rides after.
-            if state and state.memory_context:
-                system_prompt = system_prompt + state.memory_context
 
             voice_id = us.resolve_voice_id()
             model = (
@@ -921,9 +873,6 @@ class CallOrchestrator:
 
         state = self._state.get(sid)
         transcript = ""
-        phone_for_memory = ""
-        user_id_for_memory = ""
-        openai_key = None
         if state is not None:
             us = await settings_service.for_user(state.user_id)
             agent = us.get("agent_name", "Agent")
@@ -932,29 +881,15 @@ class CallOrchestrator:
                 prefix = f"{agent} (AI)" if msg.get("role") == "assistant" else "Customer"
                 lines.append(f"{prefix}: {msg.get('content', '')}")
             transcript = "\n".join(lines)
-            phone_for_memory = state.phone
-            user_id_for_memory = state.user_id
-            openai_key = us.get("openai_api_key") or None
 
         if status in ("completed", "failed", "no-answer", "busy", "canceled"):
             _spawn(
                 self._calls.finalize_by_sid(sid, status, duration, "", "", transcript)
             )
-            # Kick off memory extraction in the background. Only worth doing
-            # when the call actually connected and had real exchanges —
-            # failed/no-answer calls have no transcript worth extracting.
-            if (
-                status == "completed"
-                and transcript.strip()
-                and phone_for_memory
-                and user_id_for_memory
-            ):
-                _spawn(memory_service.extract_and_save(
-                    user_id=user_id_for_memory,
-                    phone=phone_for_memory,
-                    transcript=transcript,
-                    api_key=openai_key,
-                ))
+            # Conversation memory lives on `state` only — discarding it
+            # here intentionally drops everything the AI knew about this
+            # caller. Transcript is still saved on the calls row above
+            # for human review, but the AI starts fresh next time.
             self._state.discard(sid)
         elif status == "in-progress":
             _spawn(self._calls.update_by_sid(sid, status="answered"))
