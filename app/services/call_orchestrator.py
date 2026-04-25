@@ -8,48 +8,53 @@ user_id is stored both in the DB (calls.user_id) and in the in-process
 state map. When Twilio hits a webhook we look up the user_id from the
 SID so every downstream action uses that user's settings.
 
-Latency design — streaming everything
-─────────────────────────────────────
-When the customer finishes a turn we want the first syllable of the AI's
-reply in the caller's ear as fast as possible. The classic approach
-(await full LLM → await full TTS → hand WAV to Twilio) stacks those
-latencies serially and is painful.
+Reply flow (the redesign)
+─────────────────────────
+The previous version tried to stream audio over a single chunked HTTP
+response. Twilio's <Play> doesn't tolerate chunked transfer well —
+about half the calls cut after the first sentence. The new design:
 
-Instead we run three stages in a pipeline:
-  1. LLM streaming completion — tokens arrive ~300 ms after the first
-     fetch; we watch for sentence boundaries and emit speakable chunks.
-  2. Parallel TTS — each sentence is synthesised by Cartesia concurrently
-     with the LLM still generating the next sentence.
-  3. Streaming HTTP response — /reply-audio is an async generator.
-     It awaits the FIRST WAV chunk and flushes its header + body to
-     Twilio immediately; subsequent chunks' audio bodies are appended
-     live. Twilio's <Play> starts playing as soon as it has enough
-     header + samples, so the caller hears sentence 1 while the LLM is
-     still writing sentence 2.
+  1. /process-speech receives the customer's utterance.
+  2. handle_speech() spawns a background task that streams the LLM
+     reply, splits it into N speakable chunks, and synthesises each
+     one to its own self-contained WAV. Chunks are stored in
+     state.audio_parts as a list[bytes].
+  3. Once the FIRST chunk is ready (typically ~700-1200 ms), we return
+     TwiML with one <Play> per chunk URL — even chunks 2 and 3 that
+     aren't ready yet are referenced by URL.
+  4. Twilio fetches /reply-audio?sid=...&part=0 first; that endpoint
+     waits for chunk 0 to be ready and returns it with Content-Length.
+  5. While chunk 0 plays, the background task is finishing chunks 1-N.
+     By the time Twilio asks for chunk 1, it's usually already there.
+  6. When the customer replies (or barges in), Gather hands control
+     back to /process-speech for the next turn.
 
-Result: the customer typically hears the first word ~800–1200 ms sooner
-than on a non-streaming pipeline, and the rest of the reply lands
-without a visible seam.
+This achieves the same "first audio fast" behaviour without using
+HTTP chunked transfer. Each chunk is a complete WAV, so Twilio
+gets a Content-Length and never cuts the call mid-sentence.
 
-In-call memory
-──────────────
-The LLM remembers everything from the CURRENT call: every customer
-turn and every AI reply is appended to `state.history`, and the full
-history is replayed to the LLM on every new reply. This is plain
-conversation context — no DB, no extraction, no persistence.
+End-of-call is handled in the SAME TwiML response, not a follow-up
+webhook — when the reply contains [END_CALL]/[HOT_LEAD], we use
+play_chunks_then_hangup() instead of play_chunks_then_listen().
+This eliminates the "AI says goodbye but call doesn't end" race.
 
-When the call ends, `state` is discarded and the conversation memory
-goes with it. There is intentionally NO cross-call memory.
+Barge-in
+────────
+The Gather wrapping our <Play>s has bargeIn=true. When the customer
+starts speaking mid-sentence, Twilio stops playback and posts the
+detected speech to /process-speech. Short backchannel utterances
+(uh-huh, yeah, mm-hmm alone) are filtered out so they don't trigger
+a real reply turn.
 
-Scaling:
-  • The in-memory `_state` map works for one worker. To run multiple
-    workers, replace _CallStateStore with a Redis implementation —
-    the public orchestrator API does not change.
+Multi-tenant in-memory state
+────────────────────────────
+The `_state` map is in-process. For multi-worker deployments swap it
+for Redis. The orchestrator's public API stays the same.
 """
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -78,39 +83,37 @@ class CallState:
     history: list[dict[str, str]] = field(default_factory=list)
     started_at: str = ""
 
-    # Opening-line audio is generated once at the greeting webhook and
-    # cached here so the /opening-audio endpoint can serve it instantly.
+    # Cached opening-line audio. Generated once in handle_greeting and
+    # served from /opening-audio. Cached so Twilio retries return
+    # identical bytes.
     opening_audio: bytes | None = None
 
-    # Streaming reply pipeline:
-    #   reply_audio_queue — async queue the background producer pushes
-    #                       TTS chunks into; /reply-audio drains it as
-    #                       a streaming response body. None = sentinel
-    #                       for end-of-stream. This is what lets the
-    #                       first sentence reach Twilio before the LLM
-    #                       has finished writing the second.
-    #   producer_task     — the asyncio task feeding that queue. Held
-    #                       so we can wait for it to finish and then
-    #                       read the full post-cleaning reply text.
-    #   pending_text      — the full text the LLM produced (post tag
-    #                       cleaning). Used as a fallback if the
-    #                       streaming TTS path fails and we need to
-    #                       synthesise from scratch.
-    reply_audio_queue: asyncio.Queue[bytes | None] | None = None
-    producer_task: asyncio.Task[None] | None = None
-    pending_text: str = ""
-
-    # Post-reply control flags. The producer sets these when it detects
-    # an [END_CALL] or [TRANSFER_CALL] tag in the streamed LLM output.
-    # /post-reply-action reads them after the reply audio finishes
-    # playing and decides hangup / transfer / continue.
+    # ── Reply pipeline (turn-scoped) ──────────────────────────
+    # Reset on every customer turn.
     #
-    # We use a separate post-play webhook (rather than embedding the
-    # decision in /process-speech) so the call ends correctly even if
-    # the customer doesn't speak again — which is the whole point of
-    # [END_CALL].
-    pending_hangup: bool = False
-    pending_transfer: bool = False
+    # turn_id          monotonically increasing counter, used in audio
+    #                  URLs as a cache-buster so chunk 0 of turn 5 is
+    #                  never confused with chunk 0 of turn 4.
+    # audio_parts      list of WAV bytes ready to be served by part.
+    #                  Index = part number. Entries are filled as
+    #                  TTS finishes each chunk; ready_events[i] is set
+    #                  when audio_parts[i] is available.
+    # ready_events     parallel list of asyncio.Event; ready_events[i]
+    #                  is set the moment audio_parts[i] gets populated.
+    # producer_done    Set when the background producer task has
+    #                  finished. /reply-audio uses this to detect
+    #                  "no more chunks coming" reliably.
+    # producer_task    The background asyncio.Task itself.
+    turn_id: int = 0
+    audio_parts: list[bytes | None] = field(default_factory=list)
+    ready_events: list[asyncio.Event] = field(default_factory=list)
+    producer_done: asyncio.Event = field(default_factory=asyncio.Event)
+    producer_task: asyncio.Task[None] | None = None
+
+    # The full text of the most recent AI reply (post-cleaning).
+    # Used for repetition detection on the next turn.
+    pending_text: str = ""
+    last_ai_reply: str = ""
 
 
 class _CallStateStore:
@@ -137,95 +140,114 @@ def _spawn(coro) -> None:
 
 
 # ═══════════════════════════════════════════════════════════════
-# WAV concatenation helper
+# Backchannel filter (keeps barge-in feeling natural)
 # ═══════════════════════════════════════════════════════════════
-# Cartesia returns a standalone WAV (RIFF header + fmt chunk + data chunk)
-# per TTS call. When we stream several per turn we stitch them into one
-# WAV so Twilio's <Play> sees a single valid file.
+# When bargeIn is on, Twilio's STT picks up everything — including
+# tiny acknowledgment noises ("uh-huh", "yeah", coughs). If we send
+# every one of those to the LLM as a real turn, the conversation falls
+# apart: AI keeps re-replying to noise.
 #
-# We do this in pure Python to avoid a dependency on wave/soundfile —
-# keeping it tight and allocation-light enough for the hot path.
+# This filter discards utterances that are:
+#   • shorter than 3 characters after stripping, OR
+#   • match a known backchannel/filler word
+#
+# Real-world threshold: the SHORTEST meaningful customer turn is
+# usually "yes" / "no" / "ok" — those are 2-3 chars. We let those
+# through. We block "uh", "um", "hm", "mm", and pure punctuation.
+
+_BACKCHANNELS = frozenset({
+    "uh", "um", "hm", "mm", "mhm", "mmhm", "uhuh", "uhhuh",
+    "ah", "oh", "eh", "huh", "haan",  # "haan" is Hindi for "yes" but very short — let it through actually
+})
+
+# Override: these short tokens ARE meaningful, don't filter them.
+_MEANINGFUL_SHORT = frozenset({
+    "yes", "no", "ok", "okay", "sure", "yep", "nope", "yeah",
+    "haan", "nahi", "ji", "han",   # Hindi
+    "naam", "nahin",
+    "نعم", "لا",                   # Arabic yes/no
+})
 
 
-def _concat_wavs(chunks: list[bytes]) -> bytes:
-    """Concatenate multiple WAV blobs into one by merging their data chunks.
+def _is_backchannel(text: str) -> bool:
+    """Return True if the utterance is too tiny or filler-y to act on."""
+    s = text.strip().lower()
+    # Strip all non-word characters (handles "uh-huh", "uh.", "um!" etc.).
+    # We compare AFTER normalisation against both the meaningful and
+    # backchannel sets, so "uh-huh" → "uhhuh" → blocked.
+    normalised = re.sub(r"[^\w]+", "", s)
+    if not normalised:
+        return True
+    if normalised in _MEANINGFUL_SHORT:
+        return False
+    if normalised in _BACKCHANNELS:
+        return True
+    # Anything 1-2 chars that isn't in MEANINGFUL_SHORT is filler.
+    if len(normalised) < 3:
+        return True
+    return False
 
-    All inputs must share format (sample rate, channels, bit depth) — which
-    they do, because we always call Cartesia with the same output_format.
 
-    If parsing fails for any chunk, we fall back to returning just the first
-    chunk so the customer still hears something rather than silence.
+# ═══════════════════════════════════════════════════════════════
+# Sentence chunker for streaming TTS
+# ═══════════════════════════════════════════════════════════════
+# We split the LLM's reply into TTS-friendly chunks. Smaller chunks =
+# faster first audio, but too small sounds choppy. Around 40-120 chars
+# per chunk is the sweet spot — that's roughly one short sentence or
+# one clause.
+
+_SENTENCE_BOUNDARY = re.compile(r"([.!?…]+|\n+)")
+_MIN_CHUNK = 35
+_MAX_CHUNK = 220
+
+
+def _chunk_text_for_tts(text: str) -> list[str]:
+    """Split text into TTS chunks at sentence boundaries.
+
+    Keeps the closing punctuation with each chunk so it sounds natural.
+    Merges very short trailing fragments into the previous chunk so we
+    don't TTS something tiny like "Ok." on its own (sounds clipped).
     """
-    if not chunks:
-        return b""
-    if len(chunks) == 1:
-        return chunks[0]
-
-    try:
-        first = chunks[0]
-        # Locate the "data" subchunk in the first WAV — headers can have
-        # optional chunks before "data" (e.g. "LIST" metadata) so we scan
-        # rather than assuming a 44-byte header.
-        data_idx = first.find(b"data")
-        if data_idx < 0 or data_idx + 8 > len(first):
-            return first
-        header_end = data_idx + 8  # "data" + 4-byte size field
-        merged_body = bytearray(first[header_end:])
-
-        for c in chunks[1:]:
-            idx = c.find(b"data")
-            if idx < 0 or idx + 8 > len(c):
-                continue
-            merged_body.extend(c[idx + 8:])
-
-        # Patch sizes in the copied header.
-        header = bytearray(first[:header_end])
-        # Bytes 4–7: RIFF chunk size = total file size - 8.
-        total_size = header_end + len(merged_body) - 8
-        header[4:8] = total_size.to_bytes(4, "little")
-        # Data-chunk size lives in the 4 bytes right before our body.
-        header[header_end - 4:header_end] = len(merged_body).to_bytes(4, "little")
-
-        return bytes(header) + bytes(merged_body)
-    except Exception as exc:
-        log.error("WAV concat failed (%s) — using first chunk only", exc)
-        return chunks[0]
-
-
-def _split_wav(blob: bytes) -> tuple[bytes, bytes]:
-    """Return (header_bytes, audio_body_bytes) for a WAV.
-
-    Header = everything up to and including the "data" chunk's size field.
-    Body   = the raw audio samples after that.
-    Returns (b"", blob) if the blob doesn't look like a WAV — callers
-    can still yield the body, we just can't rewrite header sizes.
-    """
-    if not blob or len(blob) < 12 or blob[:4] != b"RIFF":
-        return b"", blob
-    idx = blob.find(b"data")
-    if idx < 0 or idx + 8 > len(blob):
-        return b"", blob
-    end = idx + 8
-    return blob[:end], blob[end:]
-
-
-def _rewrite_sizes_unknown(header: bytes) -> bytes:
-    """Rewrite a WAV header's size fields to 0xFFFFFFFF ("unknown").
-
-    When we're streaming audio to Twilio we don't know the total size
-    in advance — the LLM might still be generating sentence 3. Twilio
-    and most WAV players treat 0xFFFFFFFF in the RIFF and data size
-    fields as "read until EOF" rather than trusting a byte count that
-    would otherwise be too small and cause playback to cut off early.
-    """
-    if len(header) < 8:
-        return header
-    out = bytearray(header)
-    # RIFF chunk size at bytes 4..7
-    out[4:8] = b"\xff\xff\xff\xff"
-    # Data chunk size = last 4 bytes of our "header slice"
-    out[-4:] = b"\xff\xff\xff\xff"
-    return bytes(out)
+    if not text or not text.strip():
+        return []
+    parts = _SENTENCE_BOUNDARY.split(text)
+    # split() with a capturing group gives [text, sep, text, sep, ...]
+    # Reassemble (text + sep) pairs back into chunks.
+    chunks: list[str] = []
+    buf = ""
+    i = 0
+    while i < len(parts):
+        piece = parts[i] or ""
+        sep = parts[i + 1] if i + 1 < len(parts) else ""
+        i += 2
+        candidate = (buf + piece + sep).strip()
+        if not candidate:
+            continue
+        if len(candidate) >= _MIN_CHUNK or i >= len(parts):
+            # Long enough OR we're at the end — emit and reset.
+            if len(candidate) > _MAX_CHUNK:
+                # Hard-split very long blobs at the nearest space so a
+                # single TTS request doesn't take forever.
+                while len(candidate) > _MAX_CHUNK:
+                    cut = candidate.rfind(" ", _MIN_CHUNK, _MAX_CHUNK)
+                    if cut < 0:
+                        cut = _MAX_CHUNK
+                    chunks.append(candidate[:cut].strip())
+                    candidate = candidate[cut:].strip()
+                if candidate:
+                    chunks.append(candidate)
+            else:
+                chunks.append(candidate)
+            buf = ""
+        else:
+            buf = candidate + " "
+    if buf.strip():
+        # Couldn't reach min length — append to previous chunk if any.
+        if chunks:
+            chunks[-1] = (chunks[-1] + " " + buf.strip()).strip()
+        else:
+            chunks.append(buf.strip())
+    return chunks
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -243,15 +265,7 @@ class CallOrchestrator:
         self._state = _CallStateStore()
 
     def discard_state(self, sid: str) -> None:
-        """Drop any in-memory state for this SID.
-
-        Used by the delete endpoint: if a user deletes a call that's
-        somehow still active in memory (e.g. they hit delete from one
-        browser tab while a call is mid-conversation in another), we
-        evict the state so any further webhook hits for that SID get
-        a clean "unknown SID" response and hang up rather than leaking
-        a dangling conversation.
-        """
+        """Drop in-memory state for a SID. Used by the delete endpoint."""
         self._state.discard(sid)
 
     # ── Lifecycle ─────────────────────────────────────────────
@@ -267,23 +281,13 @@ class CallOrchestrator:
         )
         self._state.put(state)
         us = await settings_service.for_user(user_id)
-
-        _spawn(
-            self._calls.upsert(sid, user_id, {
-                "phone": phone,
-                "from_number": "",
-                "status": "ringing",
-                "agent_name": us.get("agent_name"),
-                "agency_name": us.get("agency_name"),
-            })
-        )
+        _spawn(self._calls.upsert(sid, user_id, {
+            "phone": phone, "from_number": "", "status": "ringing",
+            "agent_name": us.get("agent_name"),
+            "agency_name": us.get("agency_name"),
+        }))
 
     async def _resolve_user_for_sid(self, sid: str) -> str | None:
-        """Find the owning user for a given call SID.
-
-        First consults the in-memory state (fast path for active calls),
-        then falls back to the DB (needed across process restarts).
-        """
         state = self._state.get(sid)
         if state is not None:
             return state.user_id
@@ -296,40 +300,37 @@ class CallOrchestrator:
         user_id = await self._resolve_user_for_sid(sid)
         if user_id is None:
             log.warning("[%s] greeting received but no owning user found", sid)
-            # Cannot resolve — just hang up politely.
-            return twiml.play_and_hangup("about:blank")
+            return twiml.hangup_clean()
 
         state = self._state.get(sid)
         if state is None:
             state = CallState(
-                sid=sid,
-                user_id=user_id,
-                phone=to_number,
+                sid=sid, user_id=user_id, phone=to_number,
                 started_at=datetime.now(timezone.utc).isoformat(),
             )
             self._state.put(state)
 
         us = await settings_service.for_user(user_id)
-        _spawn(
-            self._calls.upsert(sid, user_id, {
-                "phone": to_number,
-                "from_number": from_number,
-                "status": "answered",
-                "agent_name": us.get("agent_name"),
-                "agency_name": us.get("agency_name"),
-            })
-        )
+        _spawn(self._calls.upsert(sid, user_id, {
+            "phone": to_number, "from_number": from_number,
+            "status": "answered",
+            "agent_name": us.get("agent_name"),
+            "agency_name": us.get("agency_name"),
+        }))
 
         from app.core.config import get_settings
         base = get_settings().base_url
 
+        # Cached path — Twilio retried the greeting webhook (it does
+        # this sometimes during connection setup). Don't regenerate.
         if state.opening_audio is not None:
-            return twiml.listen_with_play(
+            return twiml.play_then_listen(
                 f"{base}/webhooks/twilio/opening-audio?sid={sid}"
             )
 
         opening_text = await self._generate_opening_line(sid, us)
         state.history.append({"role": "assistant", "content": opening_text})
+        state.last_ai_reply = opening_text
         _spawn(self._messages.insert(
             call_sid=sid, user_id=user_id, role="ai", content=opening_text,
         ))
@@ -339,53 +340,40 @@ class CallOrchestrator:
         )
         if audio:
             state.opening_audio = audio
+        else:
+            log.error("[%s] opening TTS failed", sid)
 
-        return twiml.listen_with_play(
+        return twiml.play_then_listen(
             f"{base}/webhooks/twilio/opening-audio?sid={sid}"
         )
 
     async def _generate_opening_line(self, sid: str, us: UserSettings) -> str:
         provider = llm_registry.get(us.resolve_llm_provider())
         base_prompt = us.resolve_system_prompt()
-
+        # Mini gets confused if the prompt has multiple "system" sections.
+        # Keep the directive as a SHORT user-style nudge after the prompt.
         augmented = (
             base_prompt
-            + "\n\n---\n[SYSTEM]: The call just connected. Deliver your opening line now. "
-              "Do not include [END_CALL] or [HOT_LEAD]. One or two sentences only."
+            + "\n\nThe phone has just connected. Say your opening line now — "
+              "ONE warm sentence ending with a question. No tags."
         )
         try:
             raw = await provider.complete(
                 "begin",
                 history=[],
                 system_prompt=augmented,
-                model=(
-                    us.get("openai_model")
-                    if us.resolve_llm_provider() == "openai"
-                    else us.get("groq_model")
-                ),
-                api_key=(
-                    us.get("openai_api_key")
-                    if us.resolve_llm_provider() == "openai"
-                    else None
-                ),
+                model=us.get("openai_model") if us.resolve_llm_provider() == "openai" else us.get("groq_model"),
+                api_key=us.get("openai_api_key") if us.resolve_llm_provider() == "openai" else None,
             )
         except Exception as exc:
-            log.error("[%s] Opening-line LLM error: %s", sid, exc)
+            log.error("[%s] opening LLM error: %s", sid, exc)
             agent = us.get("agent_name", "Sara")
             agency = (us.get("agency_name") or "").strip()
-            # Fallback opener. Only mentions the agency if the tenant has
-            # actually set one — otherwise we'd say "calling from ." which
-            # sounds broken.
-            if agency:
-                raw = (
-                    f"Hi, this is {agent} calling from {agency} — "
-                    f"is this a good time to speak for a minute?"
-                )
-            else:
-                raw = (
-                    f"Hi, this is {agent} calling — "
-                    f"is this a good time to speak for a minute?"
-                )
+            raw = (
+                f"Hi, this is {agent} calling from {agency} — is this a good time to talk?"
+                if agency else
+                f"Hi, this is {agent} calling — is this a good time to talk?"
+            )
         cleaned = clean_reply(raw)
         log.info("[%s] AI opening: %s", sid, cleaned.text[:80])
         return cleaned.text
@@ -394,15 +382,15 @@ class CallOrchestrator:
         state = self._state.get(sid)
         return state.opening_audio if state else None
 
-    # ── Speech turn (streaming pipeline) ──────────────────────
+    # ── Customer speech turn ─────────────────────────────────
     async def handle_speech(
-        self, sid: str, to_number: str, from_number: str, speech: str
+        self, sid: str, to_number: str, from_number: str, speech: str,
     ) -> str:
-        """Handle one customer utterance.
+        """Process one customer utterance and return TwiML for the AI's reply.
 
-        This method returns TwiML as fast as possible — the heavy lifting
-        (streaming LLM + parallel TTS) runs as a background task, and the
-        audio is served from /reply-audio when Twilio comes asking.
+        The TwiML returned here references the audio chunks via URL.
+        Twilio fetches each chunk from /reply-audio?sid=...&part=N
+        as it plays them.
         """
         from app.core.config import get_settings
         base = get_settings().base_url
@@ -410,16 +398,14 @@ class CallOrchestrator:
 
         user_id = await self._resolve_user_for_sid(sid)
         if user_id is None:
-            log.warning("[%s] process-speech: unknown SID", sid)
-            return twiml.play_and_hangup("about:blank")
+            log.warning("[%s] process-speech: unknown SID — hanging up", sid)
+            return twiml.hangup_clean()
 
         us = await settings_service.for_user(user_id)
         state = self._state.get(sid)
         if state is None:
             state = CallState(
-                sid=sid,
-                user_id=user_id,
-                phone=to_number,
+                sid=sid, user_id=user_id, phone=to_number,
                 started_at=datetime.now(timezone.utc).isoformat(),
             )
             self._state.put(state)
@@ -429,72 +415,127 @@ class CallOrchestrator:
                 "agent_name": us.get("agent_name"),
                 "agency_name": us.get("agency_name"),
             }))
-        else:
-            _spawn(self._calls.update_by_sid(sid, status="answered"))
 
+        # Empty speech → reprompt with silent gather. Twilio will end up
+        # back here with another empty body if the caller stays silent;
+        # silence-prompt handler has the actual "are you there?" logic.
         if not speech:
             return twiml.listen_silent()
+
+        # Backchannel filter — short fillers shouldn't drive a new turn.
+        if _is_backchannel(speech):
+            log.info("[%s] backchannel ignored: %r", sid, speech)
+            return twiml.listen_silent()
+
+        # Cancel any prior reply still in flight (caller barged in
+        # before the previous reply finished). This prevents the
+        # outdated reply audio from continuing in the background.
+        if state.producer_task is not None and not state.producer_task.done():
+            state.producer_task.cancel()
 
         _spawn(self._messages.insert(
             call_sid=sid, user_id=user_id, role="customer", content=speech,
         ))
         state.history.append({"role": "user", "content": speech})
 
-        # Kick off the streaming reply pipeline. We do NOT await it here —
-        # we return TwiML immediately and let Twilio pull the audio from
-        # /reply-audio, which drains the queue as a streaming response.
-        history_snapshot = list(state.history[:-1])  # immutable copy for the task
-        provider_name = us.resolve_llm_provider()
+        # Begin a fresh turn. Bump turn_id so the audio URLs for THIS
+        # turn don't collide with cached chunks from a previous turn.
+        state.turn_id += 1
+        state.audio_parts = []
+        state.ready_events = []
+        state.producer_done = asyncio.Event()
 
-        # Fresh queue per turn. Old one (if any) gets GC'd — any leftover
-        # /reply-audio consumer on it is from a prior turn and already
-        # finished.
-        state.reply_audio_queue = asyncio.Queue(maxsize=32)
+        history_snapshot = list(state.history[:-1])
+        provider_name = us.resolve_llm_provider()
         state.producer_task = asyncio.create_task(
-            self._stream_reply_audio(
-                sid=sid,
-                user_id=user_id,
-                us=us,
+            self._produce_reply(
+                sid=sid, user_id=user_id, us=us,
                 provider_name=provider_name,
                 customer_text=speech,
                 history=history_snapshot,
+                turn_id=state.turn_id,
                 t0=t0,
             )
         )
 
-        audio_url = f"{base}/webhooks/twilio/reply-audio?sid={sid}"
-        return twiml.listen_with_play(audio_url)
+        # Wait until the producer has prepared the FIRST chunk + told us
+        # how many chunks there are total. Bounded wait — if the LLM is
+        # slow, we time out and play a "one moment" line instead of
+        # making the customer hear silence.
+        try:
+            await asyncio.wait_for(self._first_chunk_ready(state), timeout=12.0)
+        except asyncio.TimeoutError:
+            log.error("[%s] first-chunk timeout — using silence-prompt", sid)
+            return twiml.listen_silent()
 
-    async def _stream_reply_audio(
-        self,
-        *,
-        sid: str,
-        user_id: str,
-        us: UserSettings,
-        provider_name: str,
-        customer_text: str,
-        history: list[dict[str, str]],
-        t0: datetime,
+        # Decide TwiML shape based on the cleaned reply's flags.
+        # The producer sets these on state via _commit_reply_text.
+        reply_text = state.pending_text or ""
+        end_call = getattr(state, "_pending_end_call", False)
+        transfer_call = getattr(state, "_pending_transfer", False)
+
+        # Build URLs for every chunk the producer has scheduled.
+        # ready_events tells us how many chunks total — we URL them all
+        # even if some are still being synthesised. /reply-audio?part=N
+        # waits for that chunk to be ready before responding.
+        urls = [
+            f"{base}/webhooks/twilio/reply-audio?sid={sid}&turn={state.turn_id}&part={i}"
+            for i in range(len(state.ready_events))
+        ]
+
+        log.info(
+            "[%s] turn %d: %d chunks, end=%s transfer=%s reply=%r",
+            sid, state.turn_id, len(urls), end_call, transfer_call,
+            reply_text[:80],
+        )
+
+        if transfer_call:
+            transfer_number = (us.get("transfer_number") or "").strip()
+            if transfer_number:
+                return twiml.play_chunks_then_transfer(
+                    urls, transfer_number, sid,
+                )
+            log.warning("[%s] transfer requested but no number set — ending", sid)
+            return twiml.play_chunks_then_hangup(urls)
+
+        if end_call:
+            return twiml.play_chunks_then_hangup(urls)
+
+        return twiml.play_chunks_then_listen(urls)
+
+    async def _first_chunk_ready(self, state: CallState) -> None:
+        """Wait until ready_events[0] is set OR the producer signals done.
+
+        We can't simply do `await state.ready_events[0]` because at the
+        moment we're called, ready_events may still be empty (the
+        producer hasn't even computed how many chunks there'll be yet).
+        So we poll briefly until it shows up.
+        """
+        # Wait for the producer to populate ready_events at all.
+        while not state.ready_events:
+            if state.producer_done.is_set():
+                return  # producer finished without producing chunks
+            await asyncio.sleep(0.05)
+        await state.ready_events[0].wait()
+
+    # ── The producer: LLM stream → chunked TTS → state.audio_parts ──
+    async def _produce_reply(
+        self, *,
+        sid: str, user_id: str, us: UserSettings, provider_name: str,
+        customer_text: str, history: list[dict[str, str]],
+        turn_id: int, t0: datetime,
     ) -> None:
-        """Producer: stream LLM → fire TTS in parallel → push WAV chunks into queue.
+        """Generate the AI reply and synthesise its audio chunks.
 
-        The audio HTTP response (/reply-audio) acts as the consumer. The
-        queue decouples them so the first TTS chunk can be flushed to
-        Twilio while the LLM is still generating the second sentence.
-
-        Pushes None as a sentinel when done. Errors always ensure a
-        terminating None is pushed so the consumer doesn't hang.
+        Writes results into the call's `audio_parts` list and sets
+        `ready_events[i]` as each chunk completes.
         """
         state = self._state.get(sid)
-        queue = state.reply_audio_queue if state else None
-
-        async def _put(chunk: bytes | None) -> None:
-            if queue is not None:
-                await queue.put(chunk)
+        if state is None or state.turn_id != turn_id:
+            return  # call ended or new turn already started
 
         try:
             system_prompt = us.resolve_system_prompt()
-
             voice_id = us.resolve_voice_id()
             model = (
                 us.get("openai_model") if provider_name == "openai"
@@ -503,411 +544,298 @@ class CallOrchestrator:
             api_key = us.get("openai_api_key") if provider_name == "openai" else None
             provider = llm_registry.get(provider_name)
 
-            # ── Path A: non-streaming provider (Groq) ──────────────
-            if not isinstance(provider, OpenAIProvider):
-                try:
-                    raw_reply = await provider.complete(
-                        customer_text,
-                        history=history,
-                        system_prompt=system_prompt,
-                        model=model,
-                        api_key=api_key,
-                    )
-                except Exception as exc:
-                    log.error("[%s] LLM error: %s", sid, exc)
-                    raw_reply = "Sorry, I missed that — could you say that again?"
+            # Get the full reply text first. We use the streaming endpoint
+            # to keep first-token-fast, but accumulate text rather than
+            # streaming each chunk straight to TTS — because we need to
+            # split intelligently at sentence boundaries AFTER the model
+            # is done so we don't end up with weird mid-clause splits.
+            full_text = await self._collect_full_reply(
+                provider, customer_text, history,
+                system_prompt, model, api_key,
+            )
 
-                cleaned = clean_reply(raw_reply)
-                self._commit_reply_text(sid, user_id, cleaned)
-                audio = await tts_provider.synthesize(cleaned.text, voice_id=voice_id)
-                await _put(audio)
-                t_total = (datetime.now(timezone.utc) - t0).total_seconds()
-                log.info("[%s] non-stream reply total %.2fs", sid, t_total)
-                return
+            cleaned = clean_reply(full_text)
 
-            # ── Path B: streaming provider (OpenAI) ─────────────────
-            # We spawn a TTS task per LLM sentence, then drain them IN
-            # ORDER and push into the audio queue as soon as each is
-            # ready. That preserves playback order while still letting
-            # sentence 2's TTS overlap with sentence 1 playing.
-            tts_tasks: list[asyncio.Task[bytes | None]] = []
-            full_text_parts: list[str] = []
-            first_chunk_at: datetime | None = None
+            # Repetition guard: if mini is about to say the same thing
+            # again, push it forward instead.
+            if state.last_ai_reply and self._is_repeat(cleaned.text, state.last_ai_reply):
+                log.warning("[%s] repetition detected — substituting wrap-up", sid)
+                cleaned = clean_reply(
+                    "Sorry, looks like we may be going in circles — let me have "
+                    "the team follow up with you on this. Have a great day!"
+                )
 
-            async def _drain_ready_tts() -> None:
-                """Push any completed TTS chunks at the head of the queue.
-
-                We only push tasks from the FRONT of `tts_tasks` to keep
-                ordering correct. If task 0 isn't done yet, we can't push
-                task 1 even if it finished — otherwise the caller would
-                hear sentence 2 before sentence 1.
-                """
-                while tts_tasks and tts_tasks[0].done():
-                    task = tts_tasks.pop(0)
-                    try:
-                        audio_bytes = task.result()
-                    except Exception as exc:
-                        log.error("[%s] TTS chunk error: %s", sid, exc)
-                        audio_bytes = None
-                    if audio_bytes:
-                        await _put(audio_bytes)
-
-            try:
-                async for chunk in provider.stream_sentences(
-                    customer_text,
-                    history=history,
-                    system_prompt=system_prompt,
-                    model=model,
-                    api_key=api_key,
-                ):
-                    if not chunk.strip():
-                        continue
-                    if first_chunk_at is None:
-                        first_chunk_at = datetime.now(timezone.utc)
-                        log.info(
-                            "[%s] first LLM chunk in %.2fs: '%s'",
-                            sid,
-                            (first_chunk_at - t0).total_seconds(),
-                            chunk[:60],
-                        )
-                    full_text_parts.append(chunk)
-                    tts_tasks.append(asyncio.create_task(
-                        tts_provider.synthesize(chunk, voice_id=voice_id)
-                    ))
-                    # Opportunistic drain — keeps latency-to-first-audio low
-                    # without waiting for the LLM to finish.
-                    await _drain_ready_tts()
-            except Exception as exc:
-                log.error("[%s] LLM stream error: %s", sid, exc)
-
-            # Fallback: stream produced nothing. Do one non-streaming
-            # completion so the call doesn't go silent.
-            if not full_text_parts:
-                log.warning("[%s] empty stream, falling back to non-streaming", sid)
-                try:
-                    raw = await provider.complete(
-                        customer_text,
-                        history=history,
-                        system_prompt=system_prompt,
-                        model=model,
-                        api_key=api_key,
-                    )
-                except Exception as exc:
-                    log.error("[%s] fallback LLM error: %s", sid, exc)
-                    raw = "Sorry, I missed that — could you say that again?"
-                cleaned = clean_reply(raw)
-                self._commit_reply_text(sid, user_id, cleaned)
-                audio = await tts_provider.synthesize(cleaned.text, voice_id=voice_id)
-                await _put(audio)
-                return
-
-            # LLM done — now drain any remaining TTS tasks in order.
-            chunk_count = 0
-            for task in tts_tasks:
-                try:
-                    audio_bytes = await asyncio.wait_for(task, timeout=10.0)
-                except asyncio.TimeoutError:
-                    log.error("[%s] TTS chunk timed out", sid)
-                    audio_bytes = None
-                except Exception as exc:
-                    log.error("[%s] TTS chunk error: %s", sid, exc)
-                    audio_bytes = None
-                if audio_bytes:
-                    await _put(audio_bytes)
-                    chunk_count += 1
-
-            # Commit the full post-clean text (for end-call detection,
-            # DB, history). The chunks shipped to the caller already had
-            # [TAG] markers stripped; clean_reply on the joined text
-            # picks up end-phrase / hot-lead flags.
-            full_raw = " ".join(full_text_parts)
-            cleaned = clean_reply(full_raw)
             self._commit_reply_text(sid, user_id, cleaned)
 
-            t_total = (datetime.now(timezone.utc) - t0).total_seconds()
+            # Split into TTS chunks AFTER the full text is in. Splitting
+            # before adds nothing because we still have to wait for the
+            # LLM to be done before we know the FULL text was clean.
+            chunks = _chunk_text_for_tts(cleaned.text)
+            if not chunks:
+                chunks = [cleaned.text or "Thank you, have a great day!"]
+
+            # Pre-allocate slots so we know how many parts up-front.
+            for _ in chunks:
+                state.audio_parts.append(None)
+                state.ready_events.append(asyncio.Event())
+
             log.info(
-                "[%s] streamed reply: %d chunks, total %.2fs, end=%s hot=%s",
-                sid, chunk_count, t_total,
-                cleaned.end_call, cleaned.hot_lead,
+                "[%s] turn %d producer: %d chunks total, first chunk = %r",
+                sid, turn_id, len(chunks), chunks[0][:60],
             )
+
+            # Synthesise chunks in PARALLEL (so chunk 1 can be ready
+            # before chunk 0 finishes if Cartesia is faster on the
+            # second one — uncommon but possible). We still SET each
+            # ready_event individually so the consumer doesn't wait
+            # for chunks it hasn't asked for yet.
+            await asyncio.gather(*[
+                self._synthesise_chunk(state, idx, chunks[idx], voice_id, sid)
+                for idx in range(len(chunks))
+            ], return_exceptions=True)
+
+            t_total = (datetime.now(timezone.utc) - t0).total_seconds()
+            ok_count = sum(1 for p in state.audio_parts if p)
+            log.info(
+                "[%s] turn %d done: %d/%d chunks ok, %.2fs",
+                sid, turn_id, ok_count, len(chunks), t_total,
+            )
+        except asyncio.CancelledError:
+            log.info("[%s] turn %d cancelled (barge-in)", sid, turn_id)
+            raise
         except Exception as exc:
             log.error("[%s] producer crashed: %s", sid, exc)
         finally:
-            # Always terminate the queue so the consumer exits.
-            await _put(None)
+            # Always set ALL ready_events so the consumer doesn't hang.
+            for ev in state.ready_events:
+                if not ev.is_set():
+                    ev.set()
+            state.producer_done.set()
+
+    async def _collect_full_reply(
+        self, provider, customer_text, history, system_prompt, model, api_key,
+    ) -> str:
+        """Run the LLM and return the complete reply as one string.
+
+        Prefers streaming for first-token latency, but accumulates the
+        full text — we don't speak partial sentences. This keeps the
+        chunking step deterministic and avoids ugly mid-clause cuts.
+        """
+        if isinstance(provider, OpenAIProvider):
+            try:
+                parts: list[str] = []
+                async for piece in provider.stream_sentences(
+                    customer_text, history=history,
+                    system_prompt=system_prompt, model=model, api_key=api_key,
+                ):
+                    parts.append(piece)
+                if parts:
+                    return " ".join(parts)
+            except Exception as exc:
+                log.error("LLM stream error: %s — falling back", exc)
+        # Non-streaming fallback (Groq path or stream failure)
+        try:
+            return await provider.complete(
+                customer_text, history=history,
+                system_prompt=system_prompt, model=model, api_key=api_key,
+            )
+        except Exception as exc:
+            log.error("LLM complete error: %s", exc)
+            return "Sorry, I didn't catch that — could you say it again?"
+
+    async def _synthesise_chunk(
+        self, state: CallState, idx: int, text: str, voice_id: str, sid: str,
+    ) -> None:
+        """TTS one chunk and store the bytes in state.audio_parts[idx]."""
+        try:
+            audio = await asyncio.wait_for(
+                tts_provider.synthesize(text, voice_id=voice_id),
+                timeout=10.0,
+            )
+        except asyncio.TimeoutError:
+            log.error("[%s] TTS timeout on chunk %d", sid, idx)
+            audio = None
+        except Exception as exc:
+            log.error("[%s] TTS error chunk %d: %s", sid, idx, exc)
+            audio = None
+        # Even on failure mark ready, otherwise consumer waits forever.
+        state.audio_parts[idx] = audio
+        state.ready_events[idx].set()
+
+    @staticmethod
+    def _is_repeat(new_text: str, last_text: str, *, threshold: float = 0.85) -> bool:
+        """Return True if `new_text` is essentially a repeat of `last_text`.
+
+        We do a cheap word-overlap ratio rather than a full Levenshtein
+        compare — fast and good enough to catch mini's "stuck in a loop"
+        mode where it parrots its own previous reply.
+        """
+        if not new_text or not last_text:
+            return False
+        new_words = set(new_text.lower().split())
+        last_words = set(last_text.lower().split())
+        if not new_words or not last_words:
+            return False
+        overlap = len(new_words & last_words) / max(len(new_words), len(last_words))
+        return overlap >= threshold
 
     def _commit_reply_text(
-        self, sid: str, user_id: str, cleaned: "CleanedReply"
+        self, sid: str, user_id: str, cleaned: CleanedReply,
     ) -> None:
-        """Persist reply text + set post-play control flags.
-
-        Called from both streaming and non-streaming paths after
-        clean_reply() has parsed the LLM output. The cleaned object's
-        flags determine whether /post-reply-action will continue
-        listening, hang up, or transfer.
-        """
+        """Persist reply text + control flags onto state."""
         state = self._state.get(sid)
         if state is not None:
             state.history.append({"role": "assistant", "content": cleaned.text})
             state.pending_text = cleaned.text
-            # Set the control flags exactly once per turn. Producer
-            # writes them; /post-reply-action reads + clears them.
-            if cleaned.transfer_call:
-                state.pending_transfer = True
-            elif cleaned.end_call:
-                state.pending_hangup = True
+            state.last_ai_reply = cleaned.text
+            state._pending_end_call = cleaned.end_call
+            state._pending_transfer = cleaned.transfer_call
         _spawn(self._messages.insert(
             call_sid=sid, user_id=user_id, role="ai", content=cleaned.text,
         ))
         if cleaned.hot_lead:
             _spawn(self._calls.update_by_sid(sid, hot_lead=True))
 
-    # ── Post-reply branching (the call-ending fix) ───────────
-    async def handle_post_reply_action(self, sid: str) -> str:
-        """Decide what Twilio should do after the AI's reply audio finishes.
+    # ── Serve a specific reply-audio chunk (Twilio fetches these) ──
+    async def serve_reply_chunk(
+        self, sid: str, turn: int, part: int,
+    ) -> bytes | None:
+        """Return the WAV bytes for a specific (sid, turn, part) tuple.
 
-        Three possible outcomes:
-          • pending_hangup   → return <Hangup/> so the call ends.
-          • pending_transfer → dial the user's transfer_number; if the
-                               dial fails or no one picks up, Twilio
-                               falls through to /transfer-status which
-                               plays a polite fallback line and hangs up.
-          • neither flag set → resume listening for the next utterance.
-
-        Flags are cleared after read so a stale state can't end the call
-        on the next turn by accident.
+        Idempotent — Twilio sometimes retries chunk fetches; we always
+        return the same bytes for the same coordinates. If the chunk
+        has been GC'd or never existed, returns None.
         """
         state = self._state.get(sid)
         if state is None:
-            # Unknown SID — safest is to hang up rather than loop forever.
-            log.warning("[%s] post-reply-action for unknown SID — hanging up", sid)
-            return twiml.hangup()
-
-        # Read + clear in one step. If we crash mid-way the worst case is
-        # a redundant continue-listening, not a stuck call.
-        hangup_now = state.pending_hangup
-        transfer_now = state.pending_transfer
-        state.pending_hangup = False
-        state.pending_transfer = False
-
-        if transfer_now:
-            us = await settings_service.for_user(state.user_id)
-            transfer_number = (us.get("transfer_number") or "").strip()
-            if not transfer_number:
-                log.warning(
-                    "[%s] [TRANSFER_CALL] but no transfer_number configured — "
-                    "ending call gracefully", sid,
-                )
-                return twiml.hangup()
-            log.info("[%s] transferring to %s", sid, transfer_number)
-            return twiml.transfer_call(transfer_number, sid)
-
-        if hangup_now:
-            log.info("[%s] ending call (end_call flag was set)", sid)
-            return twiml.hangup()
-
-        # No control flag — resume the conversation.
-        return twiml.listen_for_speech()
-
-    # ── Transfer status callback ─────────────────────────────
-    async def handle_transfer_status(
-        self, sid: str, dial_call_status: str
-    ) -> str:
-        """Called by Twilio after the <Dial> finishes.
-
-        Twilio sets DialCallStatus to one of:
-          completed           — the transferee picked up and the bridged
-                                call ended normally. Nothing more to do.
-          answered            — same as completed on some accounts.
-          no-answer / busy /
-          failed / canceled   — nobody picked up. We play a polite
-                                "experts are busy" line and hang up.
-
-        The behaviour you asked for: when the transfer doesn't connect,
-        the AI lets the customer know our experts are busy and someone
-        will call back, then ends the call warmly.
-        """
-        normalised = (dial_call_status or "").lower()
-        log.info("[%s] transfer status = %s", sid, normalised)
-
-        if normalised in ("completed", "answered"):
-            # Bridge succeeded and is now over — end this leg quietly.
-            return twiml.hangup()
-
-        # Failure path — synthesise the apology line on demand and play it.
-        state = self._state.get(sid)
-        if state is None:
-            return twiml.hangup()
-
-        us = await settings_service.for_user(state.user_id)
-        # Phrase agreed with the operator. Kept short so it fits the
-        # standard 2-sentence cap without sounding rushed.
-        apology = (
-            "Looks like our experts are busy at the moment — they'll "
-            "call you back as soon as they're available. Thank you for "
-            "understanding, and have a great day!"
-        )
-        from app.core.config import get_settings
-        base = get_settings().base_url
-
-        # Synthesise + cache the audio in state so /reply-audio can serve
-        # it. We reuse the pending_text + producer-queue pathway so we
-        # don't have to invent a second audio-serving endpoint.
-        audio = await tts_provider.synthesize(
-            apology, voice_id=us.resolve_voice_id()
-        )
-        if not audio:
-            # If TTS failed, end the call rather than hang silent.
-            log.error("[%s] transfer-failed apology TTS failed", sid)
-            return twiml.hangup()
-
-        # Stash in a fresh queue with a single chunk so /reply-audio
-        # streams it the same way it streams normal replies.
-        state.reply_audio_queue = asyncio.Queue(maxsize=2)
-        await state.reply_audio_queue.put(audio)
-        await state.reply_audio_queue.put(None)
-        state.pending_hangup = True   # play it, then post-reply will hang up
-
-        audio_url = f"{base}/webhooks/twilio/reply-audio?sid={sid}"
-        return twiml.listen_with_play(audio_url)
-
-    # ── Serve reply audio ────────────────────────────────────
-    async def stream_reply_audio(self, sid: str) -> AsyncIterator[bytes] | None:
-        """Yield WAV bytes as they become available.
-
-        Returns None if the SID is unknown — caller should send a 404
-        in that case. Otherwise returns an async generator that:
-          1. Awaits the first WAV chunk (typically ~1 s after the
-             customer finished speaking).
-          2. Yields its full RIFF header + data body immediately.
-          3. For each subsequent chunk, yields only the PCM/mu-law body
-             (without a fresh RIFF header) so Twilio sees one continuous
-             stream of samples.
-
-        Twilio's <Play> tolerates this: the header at the start declares
-        a size field we write as "unknown / streaming" (0xFFFFFFFF) so
-        Twilio doesn't stop early when it hits the declared length.
-        """
-        state = self._state.get(sid)
-        if state is None:
-            log.warning("[%s] reply-audio requested for unknown SID", sid)
+            log.warning("[%s] reply-chunk: unknown SID", sid)
+            return None
+        if state.turn_id != turn:
+            # Stale request from a previous turn. We DON'T return None
+            # because Twilio may have queued the URL and is now fetching
+            # it after the next turn started. Better to send silence
+            # (technically empty bytes) and let the conversation flow.
+            log.info("[%s] reply-chunk: stale turn %d (current %d)",
+                     sid, turn, state.turn_id)
+            return None
+        if part < 0 or part >= len(state.ready_events):
+            log.warning(
+                "[%s] reply-chunk: out-of-range part %d (have %d)",
+                sid, part, len(state.ready_events),
+            )
             return None
 
-        queue = state.reply_audio_queue
-        # Consume the queue reference so a late retry doesn't re-drain.
-        state.reply_audio_queue = None
-        producer = state.producer_task
-        state.producer_task = None
-
-        if queue is None:
-            # No producer was started for this SID — fall back to text.
-            return self._fallback_audio_generator(sid)
-
-        return self._wav_stream_generator(sid, queue, producer)
-
-    async def _wav_stream_generator(
-        self,
-        sid: str,
-        queue: asyncio.Queue[bytes | None],
-        producer: asyncio.Task[None] | None,
-    ) -> AsyncIterator[bytes]:
-        """Async generator that yields WAV bytes from the TTS queue.
-
-        See stream_reply_audio() for the overall design.
-        """
+        # Wait for this specific chunk to be ready. Bounded — we don't
+        # want a stuck synthesise to stall Twilio forever.
         try:
-            # Await first chunk — this is the latency-defining await.
-            # If the producer is very slow, time out rather than hanging
-            # Twilio forever.
-            try:
-                first = await asyncio.wait_for(queue.get(), timeout=15.0)
-            except asyncio.TimeoutError:
-                log.error("[%s] timed out waiting for first audio chunk", sid)
-                return
+            await asyncio.wait_for(state.ready_events[part].wait(), timeout=12.0)
+        except asyncio.TimeoutError:
+            log.error("[%s] reply-chunk %d timeout", sid, part)
+            return None
+        return state.audio_parts[part] if part < len(state.audio_parts) else None
 
-            if first is None:
-                # Producer died before yielding anything.
-                log.warning("[%s] producer yielded no audio", sid)
-                return
+    # ── Post-reply / transfer / status ───────────────────────
+    async def handle_post_reply_action(self, sid: str) -> str:
+        """Legacy hook — keep for back-compat. New flow doesn't use it.
 
-            # Yield the first chunk's header with an "unknown size" marker
-            # so Twilio doesn't stop at the declared data length.
-            # RIFF size field (bytes 4-7) and data-chunk size (4 bytes
-            # immediately after 'data') both get 0xFFFFFFFF.
-            header_bytes, body_bytes = _split_wav(first)
-            if header_bytes:
-                yield _rewrite_sizes_unknown(header_bytes)
-            if body_bytes:
-                yield body_bytes
+        End-of-call decisions are now baked into the TwiML returned by
+        handle_speech() (play_chunks_then_hangup vs play_chunks_then_listen),
+        so /post-reply-action is no longer in the critical path. We
+        keep the endpoint to gracefully handle any in-flight Twilio
+        call still using the old TwiML pattern.
+        """
+        log.info("[%s] legacy post-reply-action hit — listening", sid)
+        return twiml.listen_silent()
 
-            # Subsequent chunks: strip the RIFF header, yield only audio body.
-            while True:
-                next_chunk = await queue.get()
-                if next_chunk is None:
-                    break
-                _h, b = _split_wav(next_chunk)
-                if b:
-                    yield b
-        finally:
-            # Ensure the producer task is awaited (prevents "never retrieved"
-            # warnings) and any lingering queue state is dropped.
-            if producer is not None and not producer.done():
-                try:
-                    await asyncio.wait_for(producer, timeout=2.0)
-                except Exception:
-                    producer.cancel()
+    async def handle_silence_prompt(self, sid: str) -> str:
+        """Called when a Gather timed out with no speech.
 
-    async def _fallback_audio_generator(
-        self, sid: str
-    ) -> AsyncIterator[bytes]:
-        """Last-resort fallback when there's no producer queue.
-
-        Synthesises state.pending_text from scratch and yields the
-        whole WAV as a single chunk. Keeps the call from going silent.
+        Real humans pause. But after two consecutive long silences in
+        a row we end the call rather than loop forever. Twilio's
+        Gather timeout is INPUT_TIMEOUT (6s by default), so two of
+        those = ~12 seconds of dead air, which is too much.
         """
         state = self._state.get(sid)
         if state is None:
-            return
+            return twiml.hangup_clean()
+        # Track silence count on the state object.
+        state._silence_count = getattr(state, "_silence_count", 0) + 1
+        if state._silence_count >= 2:
+            log.info("[%s] hanging up after 2 silences", sid)
+            return twiml.hangup_clean()
+        # First silence — try once with "are you there?".
+        from app.core.config import get_settings
+        base = get_settings().base_url
         us = await settings_service.for_user(state.user_id)
-        fallback_text = state.pending_text or "Thank you, have a great day!"
-        log.warning("[%s] reply-audio fallback path taken", sid)
-        audio = await tts_provider.synthesize(
-            fallback_text, voice_id=us.resolve_voice_id()
-        )
-        if audio:
-            yield audio
+        prompt = "Hello — are you still there?"
+        audio = await tts_provider.synthesize(prompt, voice_id=us.resolve_voice_id())
+        if not audio:
+            return twiml.listen_silent()
+        # Cache as a one-off audio chunk and return TwiML that plays it.
+        state.turn_id += 1
+        state.audio_parts = [audio]
+        state.ready_events = [asyncio.Event()]
+        state.ready_events[0].set()
+        state.producer_done.set()
+        url = f"{base}/webhooks/twilio/reply-audio?sid={sid}&turn={state.turn_id}&part=0"
+        return twiml.play_chunks_then_listen([url])
 
-    # ── Status + recording webhooks ──────────────────────────
+    async def handle_transfer_status(
+        self, sid: str, dial_call_status: str,
+    ) -> str:
+        normalised = (dial_call_status or "").lower()
+        log.info("[%s] transfer status = %s", sid, normalised)
+        if normalised in ("completed", "answered"):
+            return twiml.hangup_clean()
+
+        state = self._state.get(sid)
+        if state is None:
+            return twiml.hangup_clean()
+        us = await settings_service.for_user(state.user_id)
+        apology = (
+            "Looks like our experts are busy at the moment — they'll call "
+            "you back as soon as they're available. Thank you for "
+            "understanding, and have a great day!"
+        )
+        audio = await tts_provider.synthesize(apology, voice_id=us.resolve_voice_id())
+        if not audio:
+            return twiml.hangup_clean()
+
+        from app.core.config import get_settings
+        base = get_settings().base_url
+        state.turn_id += 1
+        state.audio_parts = [audio]
+        state.ready_events = [asyncio.Event()]
+        state.ready_events[0].set()
+        state.producer_done.set()
+        url = f"{base}/webhooks/twilio/reply-audio?sid={sid}&turn={state.turn_id}&part=0"
+        return twiml.play_chunks_then_hangup([url])
+
     async def handle_call_status(
-        self, sid: str, status: str, duration: int
+        self, sid: str, status: str, duration: int,
     ) -> None:
         log.info("[%s] Status=%s Duration=%ss", sid, status, duration)
-
         state = self._state.get(sid)
         transcript = ""
         if state is not None:
             us = await settings_service.for_user(state.user_id)
             agent = us.get("agent_name", "Agent")
-            lines: list[str] = []
-            for msg in state.history:
-                prefix = f"{agent} (AI)" if msg.get("role") == "assistant" else "Customer"
-                lines.append(f"{prefix}: {msg.get('content', '')}")
+            lines = [
+                f"{agent + ' (AI)' if m['role'] == 'assistant' else 'Customer'}: {m['content']}"
+                for m in state.history
+            ]
             transcript = "\n".join(lines)
 
         if status in ("completed", "failed", "no-answer", "busy", "canceled"):
-            _spawn(
-                self._calls.finalize_by_sid(sid, status, duration, "", "", transcript)
-            )
-            # Conversation memory lives on `state` only — discarding it
-            # here intentionally drops everything the AI knew about this
-            # caller. Transcript is still saved on the calls row above
-            # for human review, but the AI starts fresh next time.
+            _spawn(self._calls.finalize_by_sid(
+                sid, status, duration, "", "", transcript,
+            ))
             self._state.discard(sid)
         elif status == "in-progress":
             _spawn(self._calls.update_by_sid(sid, status="answered"))
 
     async def handle_recording_status(
-        self, sid: str, recording_url: str, recording_status: str
+        self, sid: str, recording_url: str, recording_status: str,
     ) -> None:
         if recording_status != "completed" or not recording_url or not sid:
             return
@@ -918,9 +846,8 @@ class CallOrchestrator:
             public_url, path = await storage.upload_recording(sid, recording_url)
             target = public_url or (recording_url + ".mp3")
             await self._calls.set_recording_by_sid(sid, target, path)
-            log.info("[%s] Recording saved → %s", sid, target)
         except Exception as exc:
-            log.error("[%s] Recording upload error: %s", sid, exc)
+            log.error("[%s] recording upload error: %s", sid, exc)
             try:
                 await self._calls.set_recording_by_sid(sid, recording_url + ".mp3", "")
             except Exception:
