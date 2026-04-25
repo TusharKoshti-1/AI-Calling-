@@ -1,16 +1,86 @@
 /* ============================================================
  * voice.js — AI Voice page (per-user)
+ *
+ * Voice catalogue is laid out in three sections:
+ *   • Cartesia Indian voices (existing)
+ *   • ElevenLabs Indian voices (NEW in v12)
+ *   • Cartesia Arabic voices (existing)
+ *
+ * Each voice card stores its voice_id verbatim. The server uses the
+ * shape of the ID (UUID with dashes = Cartesia, 20-char no dashes =
+ * ElevenLabs) to dispatch synthesis to the correct provider.
+ *
+ * The picker stays unaware of provider details — it just sends
+ * voice_id to /api/settings (to save) or /api/voice/preview (to
+ * preview), and the server figures out where to route.
  * ============================================================ */
 (function () {
   const { api, rawFetch } = window.CallSaraAPI;
   const L = window.CallSaraLayout;
 
+  // Default fallback if user has no voice_id stored yet.
+  // Stays as the existing Cartesia Indian voice for backwards-compat
+  // with users who signed up before ElevenLabs was an option.
   const DEFAULT_VOICE = '95d51f79-c397-46f9-b49a-23763d3eaa2d';
 
+  /**
+   * Provider detection mirrors the server's `looks_like_elevenlabs_id`:
+   * Cartesia voice IDs are UUIDs with dashes; ElevenLabs IDs are 20-char
+   * alphanumeric without dashes. Used purely for UI labelling here.
+   */
+  function isElevenLabsId(id) {
+    return id && id.indexOf('-') === -1;
+  }
+
   const VOICES = {
+    // ── Cartesia: Indian (Hinglish) ────────────────────────────
     indian: [
-      { id: '95d51f79-c397-46f9-b49a-23763d3eaa2d', name: 'Priya', lang: 'Hindi / Hinglish · Female', avCls: 'av-in', note: 'Warm, natural Indian accent. Best for Hinglish calls to India.' },
+      {
+        id: '95d51f79-c397-46f9-b49a-23763d3eaa2d',
+        name: 'Priya',
+        lang: 'Hindi / Hinglish · Female',
+        avCls: 'av-in',
+        note: 'Warm, natural Indian accent. Best for Hinglish calls to India.',
+      },
     ],
+
+    // ── ElevenLabs: Indian / Indian-English / Hindi ────────────
+    // These three voice IDs are Twilio's own published defaults for
+    // their ConversationRelay product, sourced from:
+    //   https://www.twilio.com/docs/voice/conversationrelay/voice-configuration
+    // They're known-good IDs that work reliably with ElevenLabs Flash 2.5.
+    //
+    // To add more voices: open https://elevenlabs.io/app/voice-library,
+    // pick any voice (e.g. "Anika - Hindi Customer Care"), copy the
+    // 20-char ID from its Voice Settings page, paste a new entry here.
+    indianEleven: [
+      {
+        id: 'UgBBYS2sOqTuMpoF3BR0',
+        name: 'Aria',
+        lang: 'English (US) · Female',
+        avCls: 'av-in',
+        provider: 'elevenlabs',
+        note: 'ElevenLabs default. Warm professional female voice — works well for both English and Hinglish customers.',
+      },
+      {
+        id: 'mCQMfsqGDT6IDkEKR20a',
+        name: 'Meera',
+        lang: 'English (India) · Female',
+        avCls: 'av-in',
+        provider: 'elevenlabs',
+        note: 'ElevenLabs Indian English. Natural Indian accent, clearer than Cartesia for English-heavy customers.',
+      },
+      {
+        id: 'IvLWq57RKibBrqZGpQrC',
+        name: 'Anjali',
+        lang: 'Hindi · Female',
+        avCls: 'av-in',
+        provider: 'elevenlabs',
+        note: 'ElevenLabs Hindi. Best choice if your customers prefer pure Hindi over Hinglish.',
+      },
+    ],
+
+    // ── Cartesia: Arabic (Gulf) ────────────────────────────────
     arabic: [
       { id: '002622d8-19d0-4567-a16a-f99c7397c062', name: 'Huda',   lang: 'Gulf Arabic · Female', avCls: 'av-ar', note: 'Warm professional Gulf Arabic, great for female persona.' },
       { id: 'fc923f89-1de5-4ddf-b93c-6da2ba63428a', name: 'Nour',   lang: 'Gulf Arabic · Female', avCls: 'av-ar', note: 'Soft and friendly, clear Gulf dialect.' },
@@ -24,7 +94,8 @@
   let curAudio = null;
   let curBtnId = null;
   const wfTimers = {};
-  const allVoices = () => [...VOICES.indian, ...VOICES.arabic];
+  const allVoices = () =>
+    [...VOICES.indian, ...VOICES.indianEleven, ...VOICES.arabic];
 
   async function load() {
     try {
@@ -32,6 +103,7 @@
       activeVoiceId = s.voice_id || DEFAULT_VOICE;
     } catch (_) { /* use default */ }
     renderGrid('indian-voices', VOICES.indian);
+    renderGrid('indian-eleven-voices', VOICES.indianEleven);
     renderGrid('arabic-voices', VOICES.arabic);
     updateActiveLabel();
   }
@@ -41,7 +113,7 @@
     if (el) el.innerHTML = voices.map(vcHtml).join('');
     // Bind after insert
     voices.forEach((v) => {
-      const sid = v.id.replace(/-/g, '').slice(0, 8);
+      const sid = sidOf(v.id);
       const pbId = 'pb-' + sid;
       const ubId = 'ub-' + sid;
       document.getElementById(pbId)?.addEventListener('click', () => preview(v, pbId));
@@ -49,17 +121,30 @@
     });
   }
 
+  /**
+   * Build a stable short ID for DOM element lookups. Cartesia IDs have
+   * dashes; ElevenLabs IDs don't. Strip dashes from both (no-op on EL)
+   * and take the first 8 chars — collision-free across our seed list.
+   */
+  function sidOf(voiceId) {
+    return voiceId.replace(/-/g, '').slice(0, 8);
+  }
+
   function vcHtml(v) {
     const flag = v.avCls === 'av-in' ? '🇮🇳' : '🇦🇪';
-    const sid = v.id.replace(/-/g, '').slice(0, 8);
+    const sid = sidOf(v.id);
     const isActive = v.id === activeVoiceId;
+    const isEleven = isElevenLabsId(v.id);
+    const elBadge = isEleven
+      ? '<span style="font-size:8px;color:#3b82f6;background:rgba(59,130,246,0.12);padding:1px 6px;border-radius:20px;margin-left:6px;letter-spacing:1px;vertical-align:middle">11LABS</span>'
+      : '';
 
     return `<div class="vc ${isActive ? 'vc-active' : ''}" id="vc-${sid}">
       <div class="vc-head">
         <div class="vc-info">
           <div class="vc-av ${v.avCls}">${flag}</div>
           <div>
-            <div class="vc-name">${L.esc(v.name)} ${isActive ? '<span style="font-size:9px;color:var(--gold);background:var(--gold3);padding:1px 7px;border-radius:20px;vertical-align:middle;letter-spacing:1px">ACTIVE</span>' : ''}</div>
+            <div class="vc-name">${L.esc(v.name)} ${elBadge} ${isActive ? '<span style="font-size:9px;color:var(--gold);background:var(--gold3);padding:1px 7px;border-radius:20px;vertical-align:middle;letter-spacing:1px">ACTIVE</span>' : ''}</div>
             <div class="vc-lang">${L.esc(v.lang)}</div>
           </div>
         </div>
@@ -81,7 +166,7 @@
     if (curAudio) { curAudio.pause(); curAudio = null; }
     if (curBtnId && curBtnId !== btnId) resetPBtn(curBtnId);
     if (curBtnId === btnId) {
-      const sid = voice.id.replace(/-/g, '').slice(0, 8);
+      const sid = sidOf(voice.id);
       stopWf(sid);
       curBtnId = null;
       resetPBtn(btnId);
@@ -96,7 +181,7 @@
 
     const text = document.getElementById('preview-text')?.value?.trim()
       || "Hi, this is your AI assistant calling. I'm just testing the voice quality — how does it sound?";
-    const sid = voice.id.replace(/-/g, '').slice(0, 8);
+    const sid = sidOf(voice.id);
 
     try {
       const resp = await rawFetch('/api/voice/preview', {
@@ -160,9 +245,11 @@
       if (d.success) {
         activeVoiceId = voice.id;
         renderGrid('indian-voices', VOICES.indian);
+        renderGrid('indian-eleven-voices', VOICES.indianEleven);
         renderGrid('arabic-voices', VOICES.arabic);
         updateActiveLabel();
-        L.toast('✓ Voice set to ' + voice.name, 'ok');
+        const providerLabel = isElevenLabsId(voice.id) ? '11Labs' : 'Cartesia';
+        L.toast(`✓ Voice set to ${voice.name} (${providerLabel})`, 'ok');
       }
     } catch (_) {
       L.toast('Failed to save voice', 'err');
@@ -173,9 +260,13 @@
     const v = allVoices().find((x) => x.id === activeVoiceId);
     const el = document.getElementById('active-voice-name');
     if (el) {
-      el.textContent = v
-        ? (v.avCls === 'av-in' ? '🇮🇳' : '🇦🇪') + ' ' + v.name + ' — ' + v.lang
-        : 'Custom';
+      if (v) {
+        const flag = v.avCls === 'av-in' ? '🇮🇳' : '🇦🇪';
+        const tag = isElevenLabsId(v.id) ? ' · 11Labs' : ' · Cartesia';
+        el.textContent = flag + ' ' + v.name + ' — ' + v.lang + tag;
+      } else {
+        el.textContent = 'Custom';
+      }
     }
   }
 

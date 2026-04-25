@@ -73,6 +73,52 @@ log = get_logger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════════
+# Per-provider TTS concurrency limiters
+# ═══════════════════════════════════════════════════════════════
+# Each TTS provider has its own concurrency limit. Hitting it returns
+# HTTP 429 and the chunk silently fails to synthesise — meaning the
+# customer hears the reply cut off mid-sentence.
+#
+# Cartesia free/starter tier: 2 concurrent.
+# ElevenLabs Starter ($5/mo):  ~5 concurrent (varies by plan).
+#
+# We gate every TTS call through the appropriate semaphore. If the
+# limit is held by other in-flight calls, the new one waits briefly
+# rather than blowing up.
+#
+# Configurable via env vars so you can bump the limits when you
+# upgrade either provider's plan.
+import os as _os
+_CARTESIA_CONCURRENCY = max(
+    1, int(_os.environ.get("CARTESIA_CONCURRENCY", "2"))
+)
+_ELEVENLABS_CONCURRENCY = max(
+    1, int(_os.environ.get("ELEVENLABS_CONCURRENCY", "5"))
+)
+_tts_semaphores: dict[str, asyncio.Semaphore] = {
+    "cartesia":   asyncio.Semaphore(_CARTESIA_CONCURRENCY),
+    "elevenlabs": asyncio.Semaphore(_ELEVENLABS_CONCURRENCY),
+}
+log.info(
+    "TTS concurrency limits: cartesia=%d, elevenlabs=%d",
+    _CARTESIA_CONCURRENCY, _ELEVENLABS_CONCURRENCY,
+)
+
+
+def _semaphore_for_voice(voice_id: str) -> asyncio.Semaphore:
+    """Return the semaphore for whichever provider this voice ID belongs to.
+
+    We import lazily here to avoid a circular import at module load —
+    tts.__init__ imports from this file's siblings, and we import from
+    tts here, so a top-of-file import would risk a cycle on hot reload.
+    """
+    from app.services.tts import looks_like_elevenlabs_id
+    if looks_like_elevenlabs_id(voice_id):
+        return _tts_semaphores["elevenlabs"]
+    return _tts_semaphores["cartesia"]
+
+
+# ═══════════════════════════════════════════════════════════════
 # Per-call state (in-memory)
 # ═══════════════════════════════════════════════════════════════
 @dataclass
@@ -169,14 +215,24 @@ def _is_empty_input(text: str) -> bool:
 # ═══════════════════════════════════════════════════════════════
 # Sentence chunker for streaming TTS
 # ═══════════════════════════════════════════════════════════════
-# We split the LLM's reply into TTS-friendly chunks. Smaller chunks =
-# faster first audio, but too small sounds choppy. Around 40-120 chars
-# per chunk is the sweet spot — that's roughly one short sentence or
-# one clause.
+# We split the LLM's reply into TTS-friendly chunks. The trade-off:
+#
+#   • Smaller chunks = first audio plays faster
+#   • Smaller chunks = MORE concurrent TTS calls (bad on entry-tier plans)
+#
+# In v12 we lean toward FEWER, LARGER chunks. Most replies are short
+# enough (the prompt pushes for 1-2 sentences) that they fit in a
+# single chunk, meaning one TTS call per AI turn. That keeps us well
+# under any provider's concurrency limits — Cartesia free tier (2),
+# ElevenLabs Starter (5).
+#
+# 80 chars ≈ 12-15 words = one full short sentence. Long replies
+# still split, but on a 2-sentence reply we do 2 TTS calls instead
+# of 3+.
 
 _SENTENCE_BOUNDARY = re.compile(r"([.!?…]+|\n+)")
-_MIN_CHUNK = 35
-_MAX_CHUNK = 220
+_MIN_CHUNK = 80
+_MAX_CHUNK = 280
 
 
 def _chunk_text_for_tts(text: str) -> list[str]:
@@ -313,9 +369,15 @@ class CallOrchestrator:
             call_sid=sid, user_id=user_id, role="ai", content=opening_text,
         ))
 
-        audio = await tts_provider.synthesize(
-            opening_text, voice_id=us.resolve_voice_id()
-        )
+        # Greeting goes through the same semaphore-gated retry path the
+        # reply chunks use, so we don't trip whichever TTS provider's
+        # concurrency limit is in effect for this user's voice.
+        opening_voice = us.resolve_voice_id()
+        sem = _semaphore_for_voice(opening_voice)
+        async with sem:
+            audio = await self._tts_with_retry(
+                opening_text, opening_voice, sid, idx=-1,
+            )
         if audio:
             state.opening_audio = audio
         else:
@@ -624,21 +686,65 @@ class CallOrchestrator:
     async def _synthesise_chunk(
         self, state: CallState, idx: int, text: str, voice_id: str, sid: str,
     ) -> None:
-        """TTS one chunk and store the bytes in state.audio_parts[idx]."""
-        try:
-            audio = await asyncio.wait_for(
-                tts_provider.synthesize(text, voice_id=voice_id),
-                timeout=10.0,
-            )
-        except asyncio.TimeoutError:
-            log.error("[%s] TTS timeout on chunk %d", sid, idx)
-            audio = None
-        except Exception as exc:
-            log.error("[%s] TTS error chunk %d: %s", sid, idx, exc)
-            audio = None
+        """TTS one chunk and store the bytes in state.audio_parts[idx].
+
+        Wrapped in the per-provider semaphore so we never exceed our
+        subscription's concurrency limit. If all permits are held by
+        other in-flight chunks, this awaits until one frees up.
+
+        On a transient failure (provider 429, brief network blip), we
+        retry once. The provider's `synthesize` returns None on error,
+        so we detect None and retry once before giving up.
+        """
+        sem = _semaphore_for_voice(voice_id)
+        async with sem:
+            audio = await self._tts_with_retry(text, voice_id, sid, idx)
         # Even on failure mark ready, otherwise consumer waits forever.
         state.audio_parts[idx] = audio
         state.ready_events[idx].set()
+
+    async def _tts_with_retry(
+        self, text: str, voice_id: str, sid: str, idx: int,
+    ) -> bytes | None:
+        """Call TTS with one quick retry on transient failures.
+
+        First attempt is the common case. If it returns None (provider
+        sent a 429 or a network blip), we wait 350ms and try once more
+        — by then another in-flight chunk has usually freed up its slot
+        and the retry succeeds.
+        """
+        for attempt in range(2):
+            try:
+                audio = await asyncio.wait_for(
+                    tts_provider.synthesize(text, voice_id=voice_id),
+                    timeout=10.0,
+                )
+                if audio:
+                    if attempt > 0:
+                        log.info(
+                            "[%s] TTS chunk %d succeeded on retry", sid, idx,
+                        )
+                    return audio
+                if attempt == 0:
+                    await asyncio.sleep(0.35)
+                    continue
+                log.error("[%s] TTS chunk %d failed after retry", sid, idx)
+                return None
+            except asyncio.TimeoutError:
+                log.error(
+                    "[%s] TTS timeout on chunk %d (attempt %d)",
+                    sid, idx, attempt + 1,
+                )
+                if attempt == 0:
+                    continue
+                return None
+            except Exception as exc:
+                log.error("[%s] TTS error chunk %d: %s", sid, idx, exc)
+                if attempt == 0:
+                    await asyncio.sleep(0.2)
+                    continue
+                return None
+        return None
 
     @staticmethod
     def _is_repeat(new_text: str, last_text: str, *, threshold: float = 0.85) -> bool:
@@ -746,7 +852,12 @@ class CallOrchestrator:
         base = get_settings().base_url
         us = await settings_service.for_user(state.user_id)
         prompt = "Hello, are you still on the line?"
-        audio = await tts_provider.synthesize(prompt, voice_id=us.resolve_voice_id())
+        prompt_voice = us.resolve_voice_id()
+        sem = _semaphore_for_voice(prompt_voice)
+        async with sem:
+            audio = await self._tts_with_retry(
+                prompt, prompt_voice, sid, idx=-2,
+            )
         if not audio:
             return twiml.listen_silent()
         # Cache as a one-off audio chunk and return TwiML that plays it.
@@ -775,7 +886,12 @@ class CallOrchestrator:
             "you back as soon as they're available. Thank you for "
             "understanding, and have a great day!"
         )
-        audio = await tts_provider.synthesize(apology, voice_id=us.resolve_voice_id())
+        apology_voice = us.resolve_voice_id()
+        sem = _semaphore_for_voice(apology_voice)
+        async with sem:
+            audio = await self._tts_with_retry(
+                apology, apology_voice, sid, idx=-3,
+            )
         if not audio:
             return twiml.hangup_clean()
 

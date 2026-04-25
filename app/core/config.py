@@ -155,6 +155,18 @@ class Settings(BaseSettings):
     cartesia_model: str = "sonic-turbo"
     cartesia_version: str = "2024-11-13"
 
+    # ── ElevenLabs ────────────────────────────────────────────
+    # Optional second TTS provider. Selected per-user via voice_id:
+    # 20-char no-dash IDs route to ElevenLabs, 36-char UUIDs to Cartesia.
+    # Leave api_key blank if you only want to use Cartesia — calls with
+    # an ElevenLabs voice ID will then fail gracefully (logged error,
+    # falls back to "Sorry, I missed that" recovery line). The model
+    # default `eleven_flash_v2_5` is their phone-call-optimised model
+    # (~250 ms latency vs ~700 ms for the multilingual_v2 quality model).
+    elevenlabs_api_key: str = ""
+    elevenlabs_voice_id: str = "UgBBYS2sOqTuMpoF3BR0"  # warm female, en-US default
+    elevenlabs_model: str = "eleven_flash_v2_5"
+
     # ── Supabase ──────────────────────────────────────────────
     supabase_url: str = ""
     supabase_service_key: str = ""
