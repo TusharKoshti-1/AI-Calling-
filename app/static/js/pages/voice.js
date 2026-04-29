@@ -55,8 +55,8 @@
     // 20-char ID from its Voice Settings page, paste a new entry here.
     indianEleven: [
       {
-        id: 'UgBBYS2sOqTuMpoF3BR0',
-        name: 'Aria',
+        id: 'dVTC43Yewy5fAIcmsISI',
+        name: 'Anvi',
         lang: 'English (US) · Female',
         avCls: 'av-in',
         provider: 'elevenlabs',
@@ -72,8 +72,8 @@
       },
       {
         id: 'IvLWq57RKibBrqZGpQrC',
-        name: 'Anjali',
-        lang: 'Hindi · Female',
+        name: 'Rahul',
+        lang: 'Hindi · Male',
         avCls: 'av-in',
         provider: 'elevenlabs',
         note: 'ElevenLabs Hindi. Best choice if your customers prefer pure Hindi over Hinglish.',
